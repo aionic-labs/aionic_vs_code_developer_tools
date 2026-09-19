@@ -61,10 +61,7 @@ import {diffVersions} from '../github/diffVersions';
 import {createGraphQLEndpointForHostname} from '../github/gitHubCredentials';
 import {broadcastLogoutMessage, subscribeToLogout} from '../github/logoutBroadcastChannel';
 import queryGraphQL from '../github/queryGraphQL';
-import {
-  recoverReviewRequestsData,
-  recoverUserHomePageData,
-} from '../github/recoverHomePageData';
+import {recoverReviewRequestsData, recoverUserHomePageData} from '../github/recoverHomePageData';
 import reviewThreadsForVersion from '../reviewThreadsForVersion';
 import {parseSaplingStackBody} from '../saplingStack';
 import saplingVersionDiffPairs from '../saplingVersionDiff';
@@ -191,7 +188,10 @@ export const gitHubTokenListenerAtom = atom(
             if (event.storageArea !== localStorage) {
               return;
             }
-            if (event.key === null || (event.key === GITHUB_TOKEN_PROPERTY && event.newValue == null)) {
+            if (
+              event.key === null ||
+              (event.key === GITHUB_TOKEN_PROPERTY && event.newValue == null)
+            ) {
               window.removeEventListener('storage', handler);
               resolve(null);
             }
@@ -261,10 +261,7 @@ export const gitHubTokenPersistenceAtom = atom(
  * The hostname for the GitHub instance. Defaults to 'github.com' for consumer
  * GitHub, but can be set to an enterprise hostname.
  */
-export const gitHubHostnameAtom = atomWithStorage<string>(
-  GITHUB_HOSTNAME_PROPERTY,
-  'github.com',
-);
+export const gitHubHostnameAtom = atomWithStorage<string>(GITHUB_HOSTNAME_PROPERTY, 'github.com');
 
 /**
  *
@@ -386,9 +383,10 @@ export type GitHubPullRequestParams = {
  */
 export const gitHubPullRequestRefreshTriggerAtom = atomFamily(
   (_params: GitHubPullRequestParams) => atom<number>(0),
-  (a, b) => a.orgAndRepo.org === b.orgAndRepo.org &&
-            a.orgAndRepo.repo === b.orgAndRepo.repo &&
-            a.number === b.number,
+  (a, b) =>
+    a.orgAndRepo.org === b.orgAndRepo.org &&
+    a.orgAndRepo.repo === b.orgAndRepo.repo &&
+    a.number === b.number,
 );
 
 /**
@@ -407,7 +405,7 @@ export const gitHubPullRequestForParamsAtom = atomFamily(
       const token = localStorage.getItem('github.token');
       if (token == null) {
         // Return a never-settling promise to indicate we're waiting for auth
-         
+
         return new Promise<PullRequest | null>(() => {});
       }
 
@@ -419,9 +417,10 @@ export const gitHubPullRequestForParamsAtom = atomFamily(
 
       return cachingClient.getPullRequest(params.number);
     }),
-  (a, b) => a.orgAndRepo.org === b.orgAndRepo.org &&
-            a.orgAndRepo.repo === b.orgAndRepo.repo &&
-            a.number === b.number,
+  (a, b) =>
+    a.orgAndRepo.org === b.orgAndRepo.org &&
+    a.orgAndRepo.repo === b.orgAndRepo.repo &&
+    a.number === b.number,
 );
 
 // =============================================================================
@@ -473,6 +472,33 @@ export const gitHubRepoAssignableUsers = atom<Promise<UserFragment[]>>(async get
   const users = await client.getRepoAssignableUsers(query);
   return users.filter(user => user.login !== username);
 });
+
+/**
+ * Fetches users GitHub allows mentioning in the current repository. The
+ * server query is supplemented with a login-prefix filter so typing `@ti`
+ * behaves predictably even when GitHub also matches display names.
+ */
+export const gitHubRepoMentionableUsersAtom = atomFamily(
+  (query: string | null) =>
+    atom<Promise<UserFragment[]>>(async get => {
+      if (query == null) {
+        return [];
+      }
+      const client = await get(gitHubClientAtom);
+      if (client == null) {
+        return [];
+      }
+      const token = localStorage.getItem('github.token');
+      const username = token != null ? localStorage.getItem(`username.${token}`) : null;
+      const normalizedQuery = query.toLocaleLowerCase();
+      const users = await client.getRepoMentionableUsers(query === '' ? null : query);
+      return users
+        .filter(user => user.login !== username)
+        .filter(user => user.login.toLocaleLowerCase().startsWith(normalizedQuery))
+        .slice(0, 8);
+    }),
+  (left, right) => left === right,
+);
 
 // =============================================================================
 // Comment Thread Navigation
@@ -976,15 +1002,11 @@ const gitHubPullRequestForcePushesAtom = atom<ForcePushEvent[]>(get => {
           beforeCommit: beforeCommit.oid,
           beforeCommittedDate: beforeCommit.committedDate,
           beforeTree: beforeCommit.tree.oid,
-          beforeParents: (beforeCommit.parents?.nodes ?? [])
-            .filter(notEmpty)
-            .map(node => node.oid),
+          beforeParents: (beforeCommit.parents?.nodes ?? []).filter(notEmpty).map(node => node.oid),
           afterCommit: afterCommit.oid,
           afterCommittedDate: beforeCommit.committedDate,
           afterTree: afterCommit.tree.oid,
-          afterParents: (afterCommit.parents?.nodes ?? [])
-            .filter(notEmpty)
-            .map(node => node.oid),
+          afterParents: (afterCommit.parents?.nodes ?? []).filter(notEmpty).map(node => node.oid),
         };
       } else {
         return null;
@@ -1093,9 +1115,7 @@ export const gitHubPullRequestVersionsAtom = atom<Promise<Version[]>>(async get 
     const saplingStack = stackedPR.body;
 
     // Prefetch all commits upfront to avoid await in loop
-    const allFetchedCommits = await Promise.all(
-      commits.map(c => get(gitHubCommitAtom(c.oid))),
-    );
+    const allFetchedCommits = await Promise.all(commits.map(c => get(gitHubCommitAtom(c.oid))));
     const commitsByOid = new Map<GitObjectID, Commit>();
     allFetchedCommits.forEach((commit, idx) => {
       if (commit != null) {
@@ -1497,9 +1517,7 @@ const gitHubPullRequestDiffCommitWithBaseByPathAtom = atomFamily(
         return null;
       }
 
-      const diffWithCommitIDs = await get(
-        gitHubDiffForCommitsAtom({baseCommitID, commitID}),
-      );
+      const diffWithCommitIDs = await get(gitHubDiffForCommitsAtom({baseCommitID, commitID}));
       const diff = diffWithCommitIDs?.diff;
       if (diff == null) {
         return null;
@@ -1649,87 +1667,89 @@ export type GitHubUserHomePageData = {
 
 export const gitHubUserHomePageRefreshTriggerAtom = atom(0);
 
-export const gitHubUserHomePageDataAtom = atom<Promise<GitHubUserHomePageData | null>>(async get => {
-  get(gitHubUserHomePageRefreshTriggerAtom);
-  const token = localStorage.getItem('github.token');
-  if (token == null) {
-    return null;
-  }
+export const gitHubUserHomePageDataAtom = atom<Promise<GitHubUserHomePageData | null>>(
+  async get => {
+    get(gitHubUserHomePageRefreshTriggerAtom);
+    const token = localStorage.getItem('github.token');
+    if (token == null) {
+      return null;
+    }
 
-  // Based on search query for https://github.com/pulls/review-requested
-  const reviewRequestedQuery = 'is:pr archived:false review-requested:@me';
+    // Based on search query for https://github.com/pulls/review-requested
+    const reviewRequestedQuery = 'is:pr archived:false review-requested:@me';
 
-  const hostname = localStorage.getItem('github.hostname') ?? 'github.com';
-  const graphQLEndpoint = createGraphQLEndpointForHostname(hostname);
-  const requestHeaders = createRequestHeaders(token);
-  const fetchAuthored = async () => {
-    const pullRequests: GitHubUserHomePageData['pullRequests'] = [];
-    let after: string | null = null;
-    do {
-      // Each page depends on the cursor returned by the previous page.
-      // eslint-disable-next-line no-await-in-loop
-      const data: UserHomePageQueryData = await queryGraphQL<
-        UserHomePageQueryData,
-        UserHomePageQueryVariables
-      >(UserHomePageQuery, {after}, requestHeaders, graphQLEndpoint).catch(error => {
-        const partialData = recoverUserHomePageData(error);
-        if (partialData != null) {
-          return partialData;
+    const hostname = localStorage.getItem('github.hostname') ?? 'github.com';
+    const graphQLEndpoint = createGraphQLEndpointForHostname(hostname);
+    const requestHeaders = createRequestHeaders(token);
+    const fetchAuthored = async () => {
+      const pullRequests: GitHubUserHomePageData['pullRequests'] = [];
+      let after: string | null = null;
+      do {
+        // Each page depends on the cursor returned by the previous page.
+        // eslint-disable-next-line no-await-in-loop
+        const data: UserHomePageQueryData = await queryGraphQL<
+          UserHomePageQueryData,
+          UserHomePageQueryVariables
+        >(UserHomePageQuery, {after}, requestHeaders, graphQLEndpoint).catch(error => {
+          const partialData = recoverUserHomePageData(error);
+          if (partialData != null) {
+            return partialData;
+          }
+          throw error;
+        });
+        const connection = data.viewer.pullRequests;
+        pullRequests.push(...(connection.nodes ?? []));
+        if (!connection.pageInfo.hasNextPage) {
+          return pullRequests;
         }
-        throw error;
-      });
-      const connection = data.viewer.pullRequests;
-      pullRequests.push(...(connection.nodes ?? []));
-      if (!connection.pageInfo.hasNextPage) {
-        return pullRequests;
-      }
-      after = connection.pageInfo.endCursor ?? null;
-      if (after == null) {
-        throw new Error('GitHub did not provide a cursor for the next authored PR page');
-      }
-    } while (true);
-  };
-  const fetchReviewRequests = async () => {
-    const reviewRequests: GitHubUserHomePageData['reviewRequests'] = [];
-    let after: string | null = null;
-    do {
-      // Each page depends on the cursor returned by the previous page.
-      // eslint-disable-next-line no-await-in-loop
-      const data: UserReviewRequestsQueryData = await queryGraphQL<
-        UserReviewRequestsQueryData,
-        UserReviewRequestsQueryVariables
-      >(
-        UserReviewRequestsQuery,
-        {reviewRequestedQuery, after},
-        requestHeaders,
-        graphQLEndpoint,
-      ).catch(error => {
-        const partialData = recoverReviewRequestsData(error);
-        if (partialData != null) {
-          return partialData;
+        after = connection.pageInfo.endCursor ?? null;
+        if (after == null) {
+          throw new Error('GitHub did not provide a cursor for the next authored PR page');
         }
-        throw error;
-      });
-      const connection = data.search;
-      reviewRequests.push(...(connection.nodes ?? []));
-      if (!connection.pageInfo.hasNextPage) {
-        return reviewRequests;
-      }
-      after = connection.pageInfo.endCursor ?? null;
-      if (after == null) {
-        throw new Error('GitHub did not provide a cursor for the next review-request page');
-      }
-    } while (true);
-  };
-  const [pullRequests, reviewRequests] = await Promise.all([
-    fetchAuthored(),
-    fetchReviewRequests(),
-  ]);
-  return {
-    pullRequests,
-    reviewRequests,
-  };
-});
+      } while (true);
+    };
+    const fetchReviewRequests = async () => {
+      const reviewRequests: GitHubUserHomePageData['reviewRequests'] = [];
+      let after: string | null = null;
+      do {
+        // Each page depends on the cursor returned by the previous page.
+        // eslint-disable-next-line no-await-in-loop
+        const data: UserReviewRequestsQueryData = await queryGraphQL<
+          UserReviewRequestsQueryData,
+          UserReviewRequestsQueryVariables
+        >(
+          UserReviewRequestsQuery,
+          {reviewRequestedQuery, after},
+          requestHeaders,
+          graphQLEndpoint,
+        ).catch(error => {
+          const partialData = recoverReviewRequestsData(error);
+          if (partialData != null) {
+            return partialData;
+          }
+          throw error;
+        });
+        const connection = data.search;
+        reviewRequests.push(...(connection.nodes ?? []));
+        if (!connection.pageInfo.hasNextPage) {
+          return reviewRequests;
+        }
+        after = connection.pageInfo.endCursor ?? null;
+        if (after == null) {
+          throw new Error('GitHub did not provide a cursor for the next review-request page');
+        }
+      } while (true);
+    };
+    const [pullRequests, reviewRequests] = await Promise.all([
+      fetchAuthored(),
+      fetchReviewRequests(),
+    ]);
+    return {
+      pullRequests,
+      reviewRequests,
+    };
+  },
+);
 
 // =============================================================================
 // Pull Requests Search
@@ -1814,32 +1834,16 @@ export const gitHubPullRequestPendingReviewIDAtom = atom<ID | null>(get => {
 export const gitHubPullRequestReviewThreadsAtom = atom<GitHubPullRequestReviewThread[]>(get => {
   const pullRequest = get(gitHubPullRequestAtom);
   return (pullRequest?.reviewThreads.nodes ?? []).filter(notEmpty).map(reviewThread => {
-    const {
-      id,
-      isResolved,
-      viewerCanResolve,
-      viewerCanUnresolve,
-      originalLine,
-      diffSide,
-      comments,
-    } = reviewThread;
+    const {id, isResolved, viewerCanResolve, viewerCanUnresolve, originalLine, diffSide, comments} =
+      reviewThread;
     const normalizedComments = (comments?.nodes ?? [])
       .map(comment => {
         if (comment == null) {
           return null;
         }
 
-        const {
-          id,
-          author,
-          originalCommit,
-          commit,
-          path,
-          state,
-          body,
-          bodyHTML,
-          reactionGroups,
-        } = comment;
+        const {id, author, originalCommit, commit, path, state, body, bodyHTML, reactionGroups} =
+          comment;
         const reviewThreadComment = {
           id,
           author: author ?? null,

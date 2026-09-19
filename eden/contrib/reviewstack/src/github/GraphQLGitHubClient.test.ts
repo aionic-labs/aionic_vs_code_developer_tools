@@ -28,9 +28,7 @@ describe('recursive Git tree prefetch', () => {
       {
         id: 'src-tree',
         oid: 'src-tree',
-        entries: [
-          {mode: 0o100644, name: 'a.ts', oid: 'a', path: 'src/a.ts', type: 'blob'},
-        ],
+        entries: [{mode: 0o100644, name: 'a.ts', oid: 'a', path: 'src/a.ts', type: 'blob'}],
       },
     ]);
   });
@@ -117,6 +115,36 @@ describe('commit comparisons', () => {
       ],
       mergeBaseCommit: {sha: 'base', commit: {committer: {date: '2026-09-17'}}},
     });
+
+    fetchMock.mockRestore();
+  });
+});
+
+describe('repository mentionable users', () => {
+  test('searches people who can be mentioned in the repository', async () => {
+    const user = {
+      __typename: 'User' as const,
+      avatarUrl: 'https://avatars.example/tina',
+      id: 'user-id',
+      login: 'tina',
+    };
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          data: {repository: {mentionableUsers: {nodes: [user]}}},
+        }),
+    } as Response);
+    const client = new GraphQLGitHubClient('github.com', 'owner', 'repo', 'token');
+
+    await expect(client.getRepoMentionableUsers('ti')).resolves.toEqual([user]);
+    const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(request).toEqual(
+      expect.objectContaining({
+        query: expect.stringContaining('mentionableUsers'),
+        variables: {name: 'repo', owner: 'owner', query: 'ti'},
+      }),
+    );
 
     fetchMock.mockRestore();
   });
