@@ -877,6 +877,17 @@ export const gitHubPullRequestComparisonFilesAtom = atom<Promise<CommitCompariso
       return [];
     }
 
+    const comparableVersions = get(gitHubPullRequestComparableVersionsAtom);
+    if (
+      comparableVersions?.beforeCommitID != null &&
+      get(stackedPullRequestAtom).type === 'sapling'
+    ) {
+      // No single GitHub comparison represents a diff between two isolated
+      // Sapling changes. Head-to-head metadata includes changes from rebased
+      // stack parents, so omit its misleading line totals and rename hints.
+      return [];
+    }
+
     try {
       const comparison = await client.getCommitComparison(
         diff.commitIDs.before,
