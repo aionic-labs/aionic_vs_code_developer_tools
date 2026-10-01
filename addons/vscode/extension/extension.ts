@@ -23,6 +23,7 @@ import {DeletedFileContentProvider} from './DeletedFileContentProvider';
 import {registerSaplingDiffContentProvider} from './DiffContentProvider';
 import {registerGitHubReviewCommentsProvider} from './GitHubReviewCommentsProvider';
 import {ensureTranslationsLoaded} from './i18n';
+import {InlineReview} from './inlineReview/InlineReview';
 import {Internal} from './Internal';
 import {registerISLCommands} from './islWebviewPanel';
 import {extensionVersion} from './utils';
@@ -63,6 +64,7 @@ export async function activate(
     }
     context.subscriptions.push(registerSaplingDiffContentProvider(ctx));
     context.subscriptions.push(registerGitHubReviewCommentsProvider(ctx));
+    context.subscriptions.push(new InlineReview(context, logger));
     context.subscriptions.push(new DeletedFileContentProvider());
     const inlineCommentsProvider = Internal.registerInlineCommentsProvider?.(
       context,
