@@ -1,13 +1,14 @@
 import type {Logger} from 'isl-server/src/logger';
+import type {HunkTarget} from './BulkReview';
 import type {ReviewHunk} from './ReviewFile';
 
 import * as vscode from 'vscode';
+import {reviewAllFiles} from './BulkReview';
 import {inlineReviewLines, StaleReviewError} from './ReviewFile';
 import {ReviewSession} from './ReviewSession';
 
 const PREVIEW_SCHEME = 'aionic-inline-review';
 const COMMAND = 'sapling.inlineReview.';
-type HunkTarget = {uri: string; revision: number; index: number};
 
 /** Local editor review controls; never invokes SCM, commit, or submit commands. */
 export class InlineReview
@@ -85,6 +86,13 @@ export class InlineReview
     this.command('undoAccept', () => this.changeAcceptance('undoAccept'));
     this.command('redoAccept', () => this.changeAcceptance('redoAccept'));
     this.command('rejectFile', () => this.rejectFile());
+    for (const action of ['accept', 'reject'] as const) {
+      this.command(`${action}AllFiles`, () =>
+        reviewAllFiles(this.session, action, (uri, target, content) =>
+          this.replaceFile(uri, target, content, false),
+        ),
+      );
+    }
     this.command('nextChange', () => this.navigateChange(1));
     this.command('previousChange', () => this.navigateChange(-1));
     this.command('nextFile', () => this.navigateFile(1));
@@ -262,14 +270,17 @@ export class InlineReview
     uri: vscode.Uri,
     target: HunkTarget,
     content: string | null,
+    confirm = true,
   ): Promise<void> {
-    const confirmation = await vscode.window.showWarningMessage(
-      content == null
-        ? `Delete newly created ${vscode.workspace.asRelativePath(uri)}?`
-        : `Restore all unaccepted changes in ${vscode.workspace.asRelativePath(uri)}?`,
-      {modal: true},
-      'Reject changes',
-    );
+    const confirmation = confirm
+      ? await vscode.window.showWarningMessage(
+          content == null
+            ? `Delete newly created ${vscode.workspace.asRelativePath(uri)}?`
+            : `Restore all unaccepted changes in ${vscode.workspace.asRelativePath(uri)}?`,
+          {modal: true},
+          'Reject changes',
+        )
+      : 'Reject changes';
     if (confirmation !== 'Reject changes') {
       return;
     }

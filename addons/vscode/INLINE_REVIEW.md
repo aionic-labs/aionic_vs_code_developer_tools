@@ -36,6 +36,13 @@ are never inserted into your working file to render a diff.
 - **Reject** restores just that change's previous content using VS Code's edit API.
   Text edits remain unsaved and support normal editor undo/redo.
 - **Accept All Changes in File** acknowledges the current file.
+- **Accept All Changes in All Files** acknowledges every currently pending file in
+  the workspace, including files without open tabs. Acceptance remains undoable per file.
+- **Reject All Changes in All Files** restores every currently pending file after
+  one workspace-wide confirmation, including deletion of new files and restoration
+  of deleted files. Existing text files use normal editor undo. Both actions are
+  available in the editor toolbar and Command Palette. Files that change during the
+  action or cannot be read are skipped and reported; other files still complete.
 - **Undo Accept in File** and **Redo Accept in File** reverse or reapply the current
   file's acceptance decisions, including Accept All, without changing file contents.
   Use the curved-arrow buttons in the editor title or the Command Palette. They work
