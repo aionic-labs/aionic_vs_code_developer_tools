@@ -67,6 +67,7 @@ let session: ReviewSession;
 let textChanged: (event: vscode.TextDocumentChangeEvent) => void;
 let diskChanged: (uri: vscode.Uri) => void;
 let documentOpened: (document: vscode.TextDocument) => void;
+let enabled: boolean;
 const update = jest.fn((_key: string, value: unknown) => {
   stored = value;
   storedKey = _key;
@@ -92,13 +93,17 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   stored = undefined;
+  enabled = true;
   storedKey = 'aionic.inlineReview.session.v1';
   disk.clear();
   disk.set(uri.toString(), 'original\n');
   Object.assign(vscode.workspace, {
     isTrusted: true,
     textDocuments: [],
-    getConfiguration: () => ({get: (_key: string, fallback: boolean) => fallback}),
+    getConfiguration: () => ({
+      get: (_key: string, fallback: boolean) =>
+        _key === 'inlineReview.enabled' ? enabled : fallback,
+    }),
     getWorkspaceFolder: (candidate: vscode.Uri) =>
       candidate.path.startsWith('/workspace/') ? {uri: vscode.Uri.file('/workspace')} : undefined,
     findFiles: jest.fn(() => Promise.resolve([...disk.keys()].map(key => vscode.Uri.parse(key)))),
@@ -150,6 +155,97 @@ it('snapshots existing edits as the baseline, then tracks an external write', as
   expect(session.pending).toHaveLength(1);
   expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
   expect(session.files.get(uri.toString())?.current).toBe('external edit\n');
+});
+
+it('does not discover or track files when disabled at startup', async () => {
+  enabled = false;
+  await session.initialize();
+  expect(session.isEnabled).toBe(false);
+  expect(session.tracking).toBe(false);
+  expect(vscode.workspace.findFiles).not.toHaveBeenCalled();
+  diskChanged(uri);
+  documentOpened(document('editor edit\n'));
+  await settle();
+  expect(session.files.size).toBe(0);
+  await expect(session.start()).rejects.toThrow('Enable sapling.inlineReview.enabled');
+});
+
+it('disables immediately and resumes pending review from preserved baselines', async () => {
+  await session.initialize();
+  disk.set(uri.toString(), 'pending\n');
+  await session.refresh(uri);
+  enabled = false;
+  await session.updateConfiguration();
+  expect(session.pending).toHaveLength(0);
+  expect(session.tracking).toBe(false);
+  disk.set(uri.toString(), 'while disabled\n');
+  diskChanged(uri);
+  textChanged({
+    document: document('manual\n'),
+    reason: undefined,
+    contentChanges: [
+      {
+        range: {start: {line: 0, character: 0}, end: {line: 1, character: 0}} as vscode.Range,
+        rangeOffset: 0,
+        rangeLength: 8,
+        text: 'manual\n',
+      },
+    ],
+  } as vscode.TextDocumentChangeEvent);
+  await settle();
+  expect(session.files.get(uri.toString())?.current).toBe('pending\n');
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+  enabled = true;
+  await session.updateConfiguration();
+  expect(session.tracking).toBe(true);
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(uri.toString())?.current).toBe('while disabled\n');
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+});
+
+it('keeps the disabled setting effective across reloads without refreshing snapshots', async () => {
+  await session.initialize();
+  enabled = false;
+  await session.updateConfiguration();
+  session.dispose();
+  await session.flush();
+  disk.set(uri.toString(), 'offline\n');
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  expect(session.isEnabled).toBe(false);
+  expect(session.tracking).toBe(false);
+  expect(session.pending).toHaveLength(0);
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+  enabled = true;
+  await session.updateConfiguration();
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(uri.toString())?.current).toBe('offline\n');
+});
+
+it('resumes automatically after enabling the setting before a reload', async () => {
+  await session.initialize();
+  enabled = false;
+  await session.updateConfiguration();
+  session.dispose();
+  await session.flush();
+  disk.set(uri.toString(), 'offline\n');
+  enabled = true;
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  expect(session.tracking).toBe(true);
+  expect(session.pending).toHaveLength(1);
+});
+
+it('enables tracking after a first disabled session is reloaded with the setting enabled', async () => {
+  enabled = false;
+  await session.initialize();
+  session.dispose();
+  await session.flush();
+  enabled = true;
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  expect(session.tracking).toBe(true);
+  expect(session.files.size).toBe(1);
 });
 
 it('tracks open files even when the bounded workspace search omits them', async () => {
@@ -352,12 +448,13 @@ it('does not read files or overwrite saved state in an untrusted workspace', asy
   expect(update).not.toHaveBeenCalled();
 });
 
-it('honors disabled automatic tracking', async () => {
-  Object.assign(vscode.workspace, {getConfiguration: () => ({get: () => false})});
+it('starts discovery when the disabled setting is enabled at runtime', async () => {
+  enabled = false;
   await session.initialize();
   expect(session.tracking).toBe(false);
   expect(vscode.workspace.findFiles).not.toHaveBeenCalled();
-  await session.start();
+  enabled = true;
+  await session.updateConfiguration();
   expect(session.tracking).toBe(true);
 });
 

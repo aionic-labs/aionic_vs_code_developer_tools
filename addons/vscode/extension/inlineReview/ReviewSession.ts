@@ -18,7 +18,16 @@ type StoredSession = {tracking: boolean; files: Array<{uri: string; baseline: st
 export class ReviewSession implements vscode.Disposable {
   readonly files = new Map<string, ReviewFile>();
   readonly onDidChange: vscode.Event<void>;
-  tracking = false;
+  private discovering = false;
+  get tracking(): boolean {
+    return this.enabled && this.discovering;
+  }
+  private set tracking(value: boolean) {
+    this.discovering = value;
+  }
+  get isEnabled(): boolean {
+    return this.enabled;
+  }
   ready = false;
   skipped = 0;
   private readonly changes = new vscode.EventEmitter<void>();
@@ -33,6 +42,7 @@ export class ReviewSession implements vscode.Disposable {
   private readonly sources = new SourceFiles();
   private disposed = false;
   private starting = false;
+  private enabled = true;
   private readonly reviewEdits = new Set<string>();
   private readonly reviewUndo = new Set<string>();
   private readonly editorBaselines = new WeakMap<
@@ -55,6 +65,9 @@ export class ReviewSession implements vscode.Disposable {
       watcher.onDidChange(uri => this.changedOnDisk(uri)),
       watcher.onDidDelete(uri => this.changedOnDisk(uri)),
       vscode.workspace.onDidChangeTextDocument(event => {
+        if (!this.enabled) {
+          return;
+        }
         if (event.contentChanges.length === 0) {
           // VS Code can send the content event before setting isDirty, followed
           // by a separate empty event announcing the dirty-state transition.
@@ -97,7 +110,7 @@ export class ReviewSession implements vscode.Disposable {
       }),
       vscode.workspace.onDidCloseTextDocument(document => this.changedOnDisk(document.uri)),
       vscode.workspace.onDidOpenTextDocument(document => {
-        if (this.ready && this.tracking) {
+        if (this.enabled && this.ready && this.tracking) {
           void this.trackOpenFile(document.uri).catch(error =>
             this.logger.warn('Inline review could not track open file', error),
           );
@@ -162,22 +175,46 @@ export class ReviewSession implements vscode.Disposable {
           }
         }
       }
-      this.tracking = saved.tracking === true;
     }
-    const enabled = vscode.workspace
+    this.tracking = saved == null || saved.tracking === true;
+    this.enabled = vscode.workspace
       .getConfiguration('sapling')
       .get<boolean>('inlineReview.enabled', true);
-    if (enabled && (saved == null || saved.tracking)) {
+    if (this.enabled && (saved == null || saved.tracking)) {
       await this.start();
     } else {
-      this.tracking = false;
+      if (this.enabled) {
+        this.tracking = false;
+      }
       this.ready = true;
-      await this.refreshKnownFiles();
+      if (this.enabled) {
+        await this.refreshKnownFiles();
+      }
       this.notify();
     }
   }
 
+  async updateConfiguration(): Promise<void> {
+    const enabled = vscode.workspace
+      .getConfiguration('sapling')
+      .get<boolean>('inlineReview.enabled', true);
+    if (enabled === this.enabled) {
+      return;
+    }
+    this.enabled = enabled;
+    if (enabled) {
+      await this.start();
+    } else {
+      this.queued.clear();
+      this.notify();
+      await this.flush();
+    }
+  }
+
   async start(): Promise<void> {
+    if (!this.enabled) {
+      throw new Error('Enable sapling.inlineReview.enabled in Settings before starting tracking.');
+    }
     if (this.starting || this.disposed) {
       return;
     }
@@ -252,6 +289,7 @@ export class ReviewSession implements vscode.Disposable {
   private async trackOpenFile(uri: vscode.Uri): Promise<void> {
     const key = uri.toString();
     if (
+      !this.enabled ||
       this.disposed ||
       !vscode.workspace.isTrusted ||
       !this.includes(uri) ||
@@ -263,11 +301,11 @@ export class ReviewSession implements vscode.Disposable {
       return;
     }
     const content = await this.read(uri);
-    if (content == null || this.disposed || this.files.has(key)) {
+    if (!this.enabled || content == null || this.disposed || this.files.has(key)) {
       return;
     }
     const latest = await this.read(uri);
-    if (this.disposed || this.files.has(key)) {
+    if (!this.enabled || this.disposed || this.files.has(key)) {
       return;
     }
     if (latest != null) {
@@ -284,7 +322,7 @@ export class ReviewSession implements vscode.Disposable {
   }
 
   async refresh(uri: vscode.Uri): Promise<ReviewFile | undefined> {
-    if (this.disposed || !this.includes(uri)) {
+    if (!this.enabled || this.disposed || !this.includes(uri)) {
       return undefined;
     }
     const key = uri.toString();
@@ -297,7 +335,7 @@ export class ReviewSession implements vscode.Disposable {
     const sequence = (this.reads.get(key) ?? 0) + 1;
     this.reads.set(key, sequence);
     const content = await this.read(uri);
-    if (sequence !== this.reads.get(key) || this.disposed) {
+    if (!this.enabled || sequence !== this.reads.get(key) || this.disposed) {
       return this.files.get(key);
     }
     if (content === undefined) {
@@ -317,12 +355,18 @@ export class ReviewSession implements vscode.Disposable {
   }
 
   get pending(): Array<[string, ReviewFile]> {
+    if (!this.enabled) {
+      return [];
+    }
     return [...this.files]
       .filter(([key, file]) => file.pending && !this.unavailable.has(key))
       .sort(([a], [b]) => a.localeCompare(b));
   }
 
   accept(uri: vscode.Uri, revision: number, index: number): void {
+    if (!this.enabled) {
+      throw new Error('Inline review tracking is disabled in Settings.');
+    }
     const key = uri.toString();
     const file = this.files.get(key);
     if (file == null || this.unavailable.has(key)) {
@@ -354,7 +398,7 @@ export class ReviewSession implements vscode.Disposable {
   }
 
   private changedOnDisk(uri: vscode.Uri): void {
-    if (!this.includes(uri)) {
+    if (!this.enabled || !this.includes(uri)) {
       return;
     }
     if (!this.ready) {
@@ -461,7 +505,7 @@ export class ReviewSession implements vscode.Disposable {
     if (!this.ready) {
       return;
     }
-    const tracking = this.tracking;
+    const tracking = this.discovering;
     const files = [...this.files];
     this.saveQueue = this.saveQueue
       .then(async () => {

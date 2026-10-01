@@ -41,7 +41,8 @@
         "sapling.inlineReview.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically snapshot this trusted workspace for local inline review. Applies on extension reload. Accepting changes does not stage, commit, or submit them."
+          "scope": "window",
+          "description": "Enable local inline review tracking in trusted workspaces. Changes apply immediately and persist in your user or workspace settings. Disabling stops tracking and hides review controls while preserving saved baselines; re-enabling compares files with those baselines. Accepting changes does not stage, commit, or submit them."
         },
         "sapling.commandPath": {
           "type": "string",

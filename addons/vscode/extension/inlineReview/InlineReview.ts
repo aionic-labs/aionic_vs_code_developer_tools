@@ -71,6 +71,11 @@ export class InlineReview
         }
       }),
       vscode.workspace.onDidGrantWorkspaceTrust(() => this.run(() => this.session.initialize())),
+      vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('sapling.inlineReview.enabled')) {
+          this.run(() => this.session.updateConfiguration());
+        }
+      }),
     );
     this.command('start', () => this.session.start());
     this.command('pause', () => this.session.pause());
@@ -106,7 +111,7 @@ export class InlineReview
   provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
     const key = this.originalUri(document.uri).toString();
     const file = this.session.files.get(key);
-    if (file == null || !file.pending) {
+    if (!this.session.isEnabled || file == null || !file.pending) {
       return [];
     }
     const preview = document.uri.scheme === PREVIEW_SCHEME;
@@ -411,7 +416,11 @@ export class InlineReview
       (this.session.skipped > 0
         ? ` ${this.session.skipped} binary or unreadable file(s) skipped.`
         : '');
-    this.status.show();
+    if (this.session.isEnabled) {
+      this.status.show();
+    } else {
+      this.status.hide();
+    }
     void vscode.commands.executeCommand(
       'setContext',
       'sapling.inlineReview.tracking',
@@ -430,7 +439,7 @@ export class InlineReview
     void vscode.commands.executeCommand(
       'setContext',
       'sapling.inlineReview.hasFileChanges',
-      activeFile?.pending ?? false,
+      this.session.isEnabled && (activeFile?.pending ?? false),
     );
     for (const editor of vscode.window.visibleTextEditors) {
       if (editor.document.uri.scheme === PREVIEW_SCHEME) {
@@ -442,7 +451,9 @@ export class InlineReview
   }
 
   private decorate(editor: vscode.TextEditor): void {
-    const file = this.session.files.get(this.originalUri(editor.document.uri).toString());
+    const file = this.session.isEnabled
+      ? this.session.files.get(this.originalUri(editor.document.uri).toString())
+      : undefined;
     const additions: vscode.Range[] = [];
     const removals: vscode.Range[] = [];
     const markers: vscode.DecorationOptions[] = [];
