@@ -5,11 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import type {DiffSummary} from '../types';
+
 import {act, fireEvent, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
 import {__TEST__ as ChangedFilesTestUtils} from '../ChangedFilesWithFetching';
 import {tracker} from '../analytics';
+import {allDiffSummaries} from '../codeReview/CodeReviewInfo';
+import {writeAtom} from '../jotaiUtils';
 import platform from '../platform';
 import {CommitInfoTestUtils, CommitTreeListTestUtils, ignoreRTL} from '../testQueries';
 import {
@@ -20,6 +24,7 @@ import {
   resetTestMessages,
   simulateCommits,
   simulateMessageFromServer,
+  simulateRepoConnected,
   simulateUncommittedChangedFiles,
   waitForWithTick,
 } from '../testUtils';
@@ -77,6 +82,92 @@ describe('CommitInfoView', () => {
             COMMIT('b', 'Head Commit', 'a', {isDot: true}),
           ],
         });
+      });
+    });
+
+    describe('Open in ReviewStack', () => {
+      beforeEach(() => {
+        jest.spyOn(platform, 'openExternalLink').mockImplementation(() => undefined);
+        act(() => {
+          writeAtom(allDiffSummaries, {value: null});
+          simulateRepoConnected(undefined, undefined, {
+            codeReviewSystem: {
+              type: 'github',
+              owner: 'aionic-labs',
+              repo: 'sapling',
+              hostname: 'github.com',
+            },
+          });
+          simulateCommits({
+            value: [
+              COMMIT('1', 'Public base', '0', {phase: 'public'}),
+              COMMIT('a', 'Linked commit', '1', {diffId: '36'}),
+              COMMIT('b', 'Head commit', 'a', {isDot: true, diffId: '38'}),
+              COMMIT('c', 'Unsubmitted commit', 'b'),
+            ],
+          });
+        });
+      });
+
+      it('opens the selected commit PR instead of the head PR, even before summaries load', () => {
+        clickToSelectCommit('a');
+        fireEvent.click(withinCommitInfo().getByRole('button', {name: 'Open in ReviewStack'}));
+        expect(platform.openExternalLink).toHaveBeenLastCalledWith(
+          'https://review.aioniclabs.dev/aionic-labs/sapling/pull/36',
+        );
+        clickToSelectCommit('b');
+        fireEvent.click(withinCommitInfo().getByRole('button', {name: 'Open in ReviewStack'}));
+        expect(platform.openExternalLink).toHaveBeenLastCalledWith(
+          'https://review.aioniclabs.dev/aionic-labs/sapling/pull/38',
+        );
+      });
+
+      it('uses the canonical PR repository after a rename', () => {
+        act(() => {
+          writeAtom(allDiffSummaries, {
+            value: new Map<string, DiffSummary>([
+              [
+                '38',
+                {
+                  type: 'github',
+                  number: '38',
+                  title: 'Head PR',
+                  commitMessage: '',
+                  state: 'DRAFT',
+                  url: 'https://github.com/aionic-labs/aionic_vs_code_developer_tools/pull/38',
+                  commentCount: 0,
+                  anyUnresolvedComments: false,
+                },
+              ],
+            ]),
+          });
+        });
+        fireEvent.click(withinCommitInfo().getByRole('button', {name: 'Open in ReviewStack'}));
+        expect(platform.openExternalLink).toHaveBeenLastCalledWith(
+          'https://review.aioniclabs.dev/aionic-labs/aionic_vs_code_developer_tools/pull/38',
+        );
+      });
+
+      it('hides the button for an unsubmitted commit and in new-commit mode', () => {
+        clickToSelectCommit('c');
+        expect(withinCommitInfo().queryByRole('button', {name: 'Open in ReviewStack'})).toBeNull();
+        clickToSelectCommit('b');
+        clickCommitMode();
+        expect(withinCommitInfo().queryByRole('button', {name: 'Open in ReviewStack'})).toBeNull();
+      });
+
+      it('does not send enterprise PRs to the public ReviewStack deployment', () => {
+        act(() => {
+          simulateRepoConnected(undefined, undefined, {
+            codeReviewSystem: {
+              type: 'github',
+              owner: 'company',
+              repo: 'repo',
+              hostname: 'github.example.com',
+            },
+          });
+        });
+        expect(withinCommitInfo().queryByRole('button', {name: 'Open in ReviewStack'})).toBeNull();
       });
     });
 
