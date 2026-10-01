@@ -1,29 +1,20 @@
 import type {Logger} from 'isl-server/src/logger';
 
+import {createHash} from 'node:crypto';
+import path from 'node:path';
 import * as vscode from 'vscode';
 import {ReviewFile} from './ReviewFile';
+import {SnapshotStore} from './SnapshotStore';
+import {SourceFiles} from './SourceFiles';
 
-const STORAGE_KEY = 'aionic.inlineReview.session.v1';
-const MAX_FILES = 2000;
-const MAX_FILE_BYTES = 512 * 1024;
-const MAX_SESSION_BYTES = 16 * 1024 * 1024;
-const EXCLUDED_DIRECTORIES = new Set([
-  '.git',
-  '.sl',
-  '.hg',
-  'node_modules',
-  '.venv',
-  'venv',
-  'dist',
-  'build',
-  'target',
-  '__pycache__',
-]);
-const EXCLUDE_GLOB = `**/{${[...EXCLUDED_DIRECTORIES].join(',')}}/**`;
+const STORAGE_KEY = 'aionic.inlineReview.session.v2';
+const LEGACY_STORAGE_KEY = 'aionic.inlineReview.session.v1';
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.sl', '.hg']);
 
 type StoredSession = {tracking: boolean; files: Array<{uri: string; baseline: string | null}>};
+// v2 baselines are content hashes; v1 baselines were source text in workspaceState.
 
-/** Workspace-local snapshots. No SCM commands, network calls, or commits. */
+/** Workspace-local snapshots. Git is used only for source-file discovery. */
 export class ReviewSession implements vscode.Disposable {
   readonly files = new Map<string, ReviewFile>();
   readonly onDidChange: vscode.Event<void>;
@@ -38,13 +29,24 @@ export class ReviewSession implements vscode.Disposable {
   private readonly queued = new Map<string, vscode.Uri>();
   private saveTimer?: ReturnType<typeof setTimeout>;
   private saveQueue = Promise.resolve();
+  private readonly snapshots: SnapshotStore;
+  private readonly sources = new SourceFiles();
   private disposed = false;
   private starting = false;
+  private readonly reviewEdits = new Set<string>();
+  private readonly reviewUndo = new Set<string>();
+  private readonly editorBaselines = new WeakMap<
+    vscode.TextDocument,
+    {content: string; baseline: string}
+  >();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly logger: Logger,
   ) {
+    this.snapshots = new SnapshotStore(
+      path.join((context.storageUri ?? context.globalStorageUri).fsPath, 'inline-review-snapshots'),
+    );
     this.onDidChange = this.changes.event;
     const watcher = vscode.workspace.createFileSystemWatcher('**/*');
     this.disposables.push(
@@ -53,6 +55,22 @@ export class ReviewSession implements vscode.Disposable {
       watcher.onDidChange(uri => this.changedOnDisk(uri)),
       watcher.onDidDelete(uri => this.changedOnDisk(uri)),
       vscode.workspace.onDidChangeTextDocument(event => {
+        if (event.contentChanges.length === 0) {
+          // VS Code can send the content event before setting isDirty, followed
+          // by a separate empty event announcing the dirty-state transition.
+          const pending = this.editorBaselines.get(event.document);
+          this.editorBaselines.delete(event.document);
+          if (
+            pending != null &&
+            event.document.isDirty &&
+            event.document.getText() === pending.content &&
+            this.files.get(event.document.uri.toString())?.current === pending.content
+          ) {
+            this.observe(event.document.uri, pending.content, pending.baseline);
+          }
+          return;
+        }
+        this.editorBaselines.delete(event.document);
         const key = event.document.uri.toString();
         if (!this.ready) {
           this.queued.set(key, event.document.uri);
@@ -60,20 +78,70 @@ export class ReviewSession implements vscode.Disposable {
         }
         if (this.files.has(key)) {
           this.reads.set(key, (this.reads.get(key) ?? 0) + 1);
-          this.observe(event.document.uri, event.document.getText());
+          const content = event.document.getText();
+          const file = this.files.get(key)!;
+          const isReviewUndo =
+            event.reason != null &&
+            this.reviewUndo.has(this.transition(key, file.current, content));
+          // Disk reloads are clean. VS Code does not identify which extension made
+          // a dirty-buffer edit, so those are treated like editor typing as well.
+          const baseline =
+            !this.reviewEdits.has(key) && !isReviewUndo
+              ? file.editorBaseline(content, event.contentChanges)
+              : undefined;
+          if (!event.document.isDirty && baseline !== undefined) {
+            this.editorBaselines.set(event.document, {content, baseline});
+          }
+          this.observe(event.document.uri, content, event.document.isDirty ? baseline : undefined);
         }
       }),
       vscode.workspace.onDidCloseTextDocument(document => this.changedOnDisk(document.uri)),
+      vscode.workspace.onDidOpenTextDocument(document => {
+        if (this.ready && this.tracking) {
+          void this.trackOpenFile(document.uri).catch(error =>
+            this.logger.warn('Inline review could not track open file', error),
+          );
+        }
+      }),
     );
   }
 
+  /** Our rejection and its undo/redo must retain the original review baseline. */
+  async applyReviewEdit(uri: vscode.Uri, edit: () => Thenable<boolean>): Promise<boolean> {
+    const key = uri.toString();
+    const before = this.files.get(key)?.current ?? null;
+    this.reviewEdits.add(key);
+    try {
+      const applied = await edit();
+      await this.refresh(uri);
+      if (applied) {
+        const after = this.files.get(key)?.current ?? null;
+        this.reviewUndo.add(this.transition(key, before, after));
+        this.reviewUndo.add(this.transition(key, after, before));
+        while (this.reviewUndo.size > 1000) {
+          this.reviewUndo.delete(this.reviewUndo.values().next().value!);
+        }
+      }
+      return applied;
+    } finally {
+      this.reviewEdits.delete(key);
+    }
+  }
+
+  private transition(key: string, before: string | null, after: string | null): string {
+    return createHash('sha256')
+      .update(JSON.stringify([key, before, after]))
+      .digest('hex');
+  }
+
   async initialize(): Promise<void> {
-    if (!vscode.workspace.isTrusted) {
+    if (!vscode.workspace.isTrusted || this.context.storageUri == null) {
       return;
     }
-    const saved = this.context.workspaceState.get<StoredSession>(STORAGE_KEY);
+    const current = this.context.workspaceState.get<StoredSession>(STORAGE_KEY);
+    const saved = current ?? this.context.workspaceState.get<StoredSession>(LEGACY_STORAGE_KEY);
     if (saved != null && Array.isArray(saved.files)) {
-      for (const item of saved.files.slice(0, MAX_FILES)) {
+      for (const item of saved.files) {
         if (
           typeof item.uri !== 'string' ||
           (item.baseline !== null && typeof item.baseline !== 'string')
@@ -81,8 +149,17 @@ export class ReviewSession implements vscode.Disposable {
           continue;
         }
         const uri = vscode.Uri.parse(item.uri);
-        if (this.includes(uri) && this.canAdd(item.baseline)) {
-          this.files.set(item.uri, new ReviewFile(item.baseline));
+        if (this.includes(uri)) {
+          try {
+            const baseline =
+              current != null && item.baseline != null
+                ? this.snapshots.load(item.baseline)
+                : item.baseline;
+            this.files.set(item.uri, new ReviewFile(baseline));
+          } catch (error) {
+            this.logger.warn('Could not restore inline review snapshot', error);
+            this.skip(item.uri);
+          }
         }
       }
       this.tracking = saved.tracking === true;
@@ -111,11 +188,20 @@ export class ReviewSession implements vscode.Disposable {
     this.ready = false;
     this.notify();
     try {
-      const uris = await vscode.workspace.findFiles('**/*', EXCLUDE_GLOB, MAX_FILES + 1);
-      if (uris.length > MAX_FILES) {
-        this.skipped++;
+      const uris = await this.sources.discover();
+      for (const key of this.files.keys()) {
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await this.sources.includes(vscode.Uri.parse(key)))) {
+          this.files.delete(key);
+        }
       }
-      for (const uri of uris.slice(0, MAX_FILES)) {
+      // Restore pending changes before discovering new source files.
+      await this.refreshKnownFiles();
+      for (const document of vscode.workspace.textDocuments) {
+        // eslint-disable-next-line no-await-in-loop
+        await this.trackOpenFile(document.uri);
+      }
+      for (const uri of uris) {
         if (this.disposed) {
           return;
         }
@@ -123,11 +209,14 @@ export class ReviewSession implements vscode.Disposable {
         if (this.files.has(key) || !this.includes(uri)) {
           continue;
         }
-        // Read sequentially to bound memory while enforcing the snapshot budget.
+        // Snapshot one file at a time; unchanged contents are offloaded to disk.
         // eslint-disable-next-line no-await-in-loop
         const content = await this.read(uri);
-        if (content != null && this.canAdd(content)) {
-          this.files.set(key, new ReviewFile(content));
+        if (content != null) {
+          const file = new ReviewFile(content);
+          this.files.set(key, file);
+          // eslint-disable-next-line no-await-in-loop
+          await file.saveBaseline(this.snapshots);
         } else if (content !== null) {
           this.skip(key);
         }
@@ -141,9 +230,12 @@ export class ReviewSession implements vscode.Disposable {
         await this.refresh(uri);
       }
       this.queued.clear();
+      this.logger.info(
+        `Inline review tracking ${this.files.size} source files; ${this.skipped} binary or unreadable files skipped.`,
+      );
       if (this.skipped > 0) {
         void vscode.window.showWarningMessage(
-          'Inline review skipped oversized, binary, unreadable, or excess files. See the inline review documentation for snapshot limits.',
+          'Inline review cannot review some binary or unreadable files. See the status tooltip for the count.',
         );
       }
     } finally {
@@ -157,12 +249,49 @@ export class ReviewSession implements vscode.Disposable {
     this.notify();
   }
 
+  private async trackOpenFile(uri: vscode.Uri): Promise<void> {
+    const key = uri.toString();
+    if (
+      this.disposed ||
+      !vscode.workspace.isTrusted ||
+      !this.includes(uri) ||
+      this.files.has(key)
+    ) {
+      return;
+    }
+    if (!(await this.sources.includes(uri))) {
+      return;
+    }
+    const content = await this.read(uri);
+    if (content == null || this.disposed || this.files.has(key)) {
+      return;
+    }
+    const latest = await this.read(uri);
+    if (this.disposed || this.files.has(key)) {
+      return;
+    }
+    if (latest != null) {
+      const file = new ReviewFile(latest);
+      this.files.set(key, file);
+      await file.saveBaseline(this.snapshots);
+      if (this.ignored.delete(key)) {
+        this.skipped--;
+      }
+      this.notify();
+    } else {
+      this.skip(key);
+    }
+  }
+
   async refresh(uri: vscode.Uri): Promise<ReviewFile | undefined> {
     if (this.disposed || !this.includes(uri)) {
       return undefined;
     }
     const key = uri.toString();
-    if (!this.files.has(key) && (!this.tracking || this.ignored.has(key))) {
+    if (!this.files.has(key) && !this.tracking) {
+      return undefined;
+    }
+    if (!(await this.sources.includes(uri))) {
       return undefined;
     }
     const sequence = (this.reads.get(key) ?? 0) + 1;
@@ -182,9 +311,7 @@ export class ReviewSession implements vscode.Disposable {
   async reviewable(uri: vscode.Uri): Promise<ReviewFile> {
     const file = await this.refresh(uri);
     if (file == null) {
-      throw new Error(
-        'This file cannot currently be reviewed. It may be binary, too large, or unavailable.',
-      );
+      throw new Error('This file cannot currently be reviewed. It may be binary or unavailable.');
     }
     return file;
   }
@@ -201,15 +328,6 @@ export class ReviewSession implements vscode.Disposable {
     if (file == null || this.unavailable.has(key)) {
       throw new Error('This file is not available for review.');
     }
-    const baseline = file.acceptedContent(revision, index);
-    if (
-      Buffer.byteLength(baseline ?? '') > MAX_FILE_BYTES ||
-      !this.fitsBudget(file.current, key, baseline)
-    ) {
-      throw new Error(
-        'This partial acceptance exceeds the snapshot limit. Accept a deletion first, or accept the entire file.',
-      );
-    }
     file.accept(revision, index);
     this.notify();
   }
@@ -221,6 +339,11 @@ export class ReviewSession implements vscode.Disposable {
     this.changes.fire();
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.persist(), 400);
+  }
+
+  async flush(): Promise<void> {
+    this.persist();
+    await this.saveQueue;
   }
 
   dispose(): void {
@@ -243,27 +366,24 @@ export class ReviewSession implements vscode.Disposable {
     );
   }
 
-  private observe(uri: vscode.Uri, content: string | null): boolean {
+  private observe(uri: vscode.Uri, content: string | null, baseline?: string): boolean {
     const key = uri.toString();
-    if (
-      content != null &&
-      (Buffer.byteLength(content) > MAX_FILE_BYTES || content.includes('\0'))
-    ) {
+    if (content != null && content.includes('\0')) {
       this.skip(key);
       return false;
     }
     const existing = this.files.get(key);
     if (existing != null) {
-      if (!this.fitsBudget(content, key)) {
-        this.skip(key);
-        return false;
-      }
       const recovered = this.unavailable.delete(key);
-      if (existing.current === content && !recovered) {
+      if (existing.matchesCurrent(content) && !recovered && baseline === undefined) {
         return true;
       }
+      if (baseline !== undefined && baseline !== existing.baseline) {
+        existing.baseline = baseline;
+        existing.invalidate();
+      }
       existing.update(content);
-    } else if (this.tracking && content != null && this.canAdd(content)) {
+    } else if (this.tracking && content != null) {
       this.files.set(key, new ReviewFile(null, content));
     } else {
       if (content != null) {
@@ -286,34 +406,6 @@ export class ReviewSession implements vscode.Disposable {
       .some(part => EXCLUDED_DIRECTORIES.has(part));
   }
 
-  private canAdd(content: string | null): boolean {
-    return (
-      this.files.size < MAX_FILES &&
-      Buffer.byteLength(content ?? '') <= MAX_FILE_BYTES &&
-      this.fitsBudget(content)
-    );
-  }
-
-  private fitsBudget(
-    content: string | null,
-    replacingKey?: string,
-    baseline?: string | null,
-  ): boolean {
-    // Reserve space for accepting the entire current file into the baseline, too.
-    let bytes = replacingKey == null ? Buffer.byteLength(content ?? '') * 2 : 0;
-    for (const [key, file] of this.files) {
-      bytes +=
-        2 *
-        Math.max(
-          Buffer.byteLength(
-            (key === replacingKey && baseline !== undefined ? baseline : file.baseline) ?? '',
-          ),
-          Buffer.byteLength((key === replacingKey ? content : file.current) ?? ''),
-        );
-    }
-    return bytes <= MAX_SESSION_BYTES;
-  }
-
   private skip(key: string): void {
     if (this.files.has(key) && !this.unavailable.has(key)) {
       this.unavailable.add(key);
@@ -332,17 +424,15 @@ export class ReviewSession implements vscode.Disposable {
     );
     if (open != null) {
       const content = open.getText();
-      return Buffer.byteLength(content) <= MAX_FILE_BYTES && !content.includes('\0')
-        ? content
-        : undefined;
+      return !content.includes('\0') ? content : undefined;
     }
     try {
       const stat = await vscode.workspace.fs.stat(uri);
-      if (stat.type !== vscode.FileType.File || stat.size > MAX_FILE_BYTES) {
+      if (stat.type !== vscode.FileType.File) {
         return undefined;
       }
       const bytes = await vscode.workspace.fs.readFile(uri);
-      if (bytes.length > MAX_FILE_BYTES || bytes.includes(0)) {
+      if (bytes.includes(0)) {
         return undefined;
       }
       return new TextDecoder('utf-8', {fatal: true}).decode(bytes);
@@ -359,7 +449,11 @@ export class ReviewSession implements vscode.Disposable {
     for (const key of this.files.keys()) {
       // Keep disk reads and snapshot memory bounded for large workspaces.
       // eslint-disable-next-line no-await-in-loop
-      await this.refresh(vscode.Uri.parse(key));
+      const file = await this.refresh(vscode.Uri.parse(key));
+      if (file != null) {
+        // eslint-disable-next-line no-await-in-loop
+        await file.saveBaseline(this.snapshots);
+      }
     }
   }
 
@@ -367,12 +461,23 @@ export class ReviewSession implements vscode.Disposable {
     if (!this.ready) {
       return;
     }
-    const saved: StoredSession = {
-      tracking: this.tracking,
-      files: [...this.files].map(([uri, file]) => ({uri, baseline: file.baseline})),
-    };
+    const tracking = this.tracking;
+    const files = [...this.files];
     this.saveQueue = this.saveQueue
-      .then(() => this.context.workspaceState.update(STORAGE_KEY, saved))
-      .catch(error => this.logger.warn('Could not save local inline review session', error));
+      .then(async () => {
+        const saved: StoredSession = {tracking, files: []};
+        for (const [uri, file] of files) {
+          // eslint-disable-next-line no-await-in-loop
+          const baseline = await file.saveBaseline(this.snapshots);
+          saved.files.push({uri, baseline});
+        }
+        await this.context.workspaceState.update(STORAGE_KEY, saved);
+      })
+      .catch(error => {
+        this.logger.warn('Could not save local inline review session', error);
+        void vscode.window.showWarningMessage(
+          'Inline review could not save its snapshots. Check available disk space.',
+        );
+      });
   }
 }

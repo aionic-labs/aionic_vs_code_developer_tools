@@ -215,7 +215,11 @@ export class InlineReview
       editor.document.positionAt(hunk.newEndOffset),
     );
     // VS Code checks the document version; undo/redo remains available.
-    if (!(await editor.edit(edit => edit.replace(range, hunk.removed)))) {
+    if (
+      !(await this.session.applyReviewEdit(uri, () =>
+        editor.edit(edit => edit.replace(range, hunk.removed)),
+      ))
+    ) {
       throw new StaleReviewError();
     }
     editor.selection = new vscode.Selection(range.start, range.start);
@@ -264,7 +268,7 @@ export class InlineReview
         edit.createFile(uri, {overwrite: false, ignoreIfExists: false});
         edit.insert(uri, new vscode.Position(0, 0), content);
       }
-      if (!(await vscode.workspace.applyEdit(edit))) {
+      if (!(await this.session.applyReviewEdit(uri, () => vscode.workspace.applyEdit(edit)))) {
         throw new StaleReviewError();
       }
     } else {
@@ -278,7 +282,11 @@ export class InlineReview
         editor.document.positionAt(0),
         editor.document.positionAt(editor.document.getText().length),
       );
-      if (!(await editor.edit(edit => edit.replace(range, content)))) {
+      if (
+        !(await this.session.applyReviewEdit(uri, () =>
+          editor.edit(edit => edit.replace(range, content)),
+        ))
+      ) {
         throw new StaleReviewError();
       }
     }
@@ -399,9 +407,9 @@ export class InlineReview
       ? '$(sync~spin) Inline review'
       : `$(diff) Review: ${pending.length} files${this.session.tracking ? '' : ' (paused)'}`;
     this.status.tooltip =
-      'Local change review · Accept acknowledges changes; it does not commit or stage them.' +
+      `Tracking ${this.session.files.size} source files. Accept acknowledges changes; it does not commit or stage them.` +
       (this.session.skipped > 0
-        ? ` ${this.session.skipped} file(s) skipped by snapshot limits or exclusions.`
+        ? ` ${this.session.skipped} binary or unreadable file(s) skipped.`
         : '');
     this.status.show();
     void vscode.commands.executeCommand(

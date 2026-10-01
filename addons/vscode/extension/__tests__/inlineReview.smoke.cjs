@@ -60,6 +60,13 @@ exports.run = async function () {
   await vscode.window.showTextDocument(second);
   await invoke('acceptFile');
 
+  editor = await vscode.window.showTextDocument(first);
+  await editor.edit(edit => edit.replace(editor.document.lineAt(0).range, 'const one = 100;'));
+  await lenses(first, 0);
+  await editor.document.save();
+  await lenses(first, 0);
+  console.log('PASS manual typing and save do not create review prompts');
+
   await fs.writeFile(first.fsPath, 'const one = 10;\n// unchanged\nconst two = 20;\n');
   await fs.writeFile(second.fsPath, 'const three = 30;\n');
   let changes = await lenses(first, 2);
@@ -70,7 +77,7 @@ exports.run = async function () {
   await invoke('openPreview', changes[1].command.arguments[0]);
   const preview = vscode.window.activeTextEditor;
   assert.equal(preview.document.uri.scheme, 'aionic-inline-review');
-  assert.match(preview.document.getText(), /const one = 1;\nconst one = 10;/);
+  assert.match(preview.document.getText(), /const one = 100;\nconst one = 10;/);
   assert.match(preview.document.getText(), /const two = 2;\nconst two = 20;/);
   assert.equal(preview.selection.active.line, 3, 'preview opens at the selected hunk');
   console.log('PASS full removed/added lines and selected-hunk preview navigation');
@@ -92,7 +99,8 @@ exports.run = async function () {
     console.log(
       'SKIP native Undo: command also failed in the unrelated control buffer; verify manually',
     );
-    await editor.edit(edit => edit.replace(editor.document.lineAt(2).range, 'const two = 20;'));
+    await editor.document.save();
+    await fs.writeFile(first.fsPath, 'const one = 10;\n// unchanged\nconst two = 20;\n');
   }
   await lenses(first, 1);
   editor.selection = new vscode.Selection(2, 0, 2, 0);
@@ -103,22 +111,24 @@ exports.run = async function () {
   console.log('PASS next change and previous file navigation');
 
   editor = vscode.window.activeTextEditor;
-  const lastLine = editor.document.lineAt(2).range;
-  await editor.edit(edit => edit.replace(lastLine, 'const two = 200;'));
   changes = await lenses(first, 1);
-  const previewTarget = changes[0].command.arguments[0];
-  await invoke('openPreview', previewTarget);
+  await invoke('openPreview', changes[0].command.arguments[0]);
   const livePreview = vscode.window.activeTextEditor.document;
-  await eventually(() => livePreview.getText().includes('const two = 200;'));
-  assert.match(livePreview.getText(), /const two = 200;/);
   editor = await vscode.window.showTextDocument(first);
-  await editor.edit(edit => edit.replace(editor.document.lineAt(2).range, 'const two = 300;'));
+  await editor.edit(edit => edit.replace(editor.document.lineAt(0).range, 'const one = 300;'));
+  await lenses(first, 1);
   await vscode.window.showTextDocument(livePreview);
-  await eventually(() => livePreview.getText().includes('const two = 300;'));
-  console.log('PASS unsaved edits update an already-open inline preview');
-
-  await invoke('acceptFile');
+  await eventually(() => livePreview.getText().includes('const one = 300;'));
+  editor = await vscode.window.showTextDocument(first);
+  console.log('PASS manual edits preserve unrelated pending changes and update the preview');
+  changes = await lenses(first, 1);
+  await invoke('reject', changes[0].command.arguments[0]);
   await lenses(first, 0);
-  console.log('PASS file acceptance from the preview');
+  assert.equal(editor.document.getText(), 'const one = 300;\n// unchanged\nconst two = 2;\n');
+  console.log('PASS rejecting external changes preserves manual edits');
+  await vscode.window.showTextDocument(second);
+  await invoke('acceptFile');
+  await lenses(second, 0);
+  console.log('PASS file acceptance');
   console.log('AIONIC_INLINE_REVIEW_SMOKE_PASSED');
 };

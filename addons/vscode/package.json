@@ -240,7 +240,7 @@
       },
       {
         "command": "sapling.inlineReview.showFiles",
-        "title": "Inline Review: Show Changed Files",
+        "title": "Inline Review: Show Unreviewed Files",
         "category": "Aionic Sapling",
         "icon": "$(files)"
       },
@@ -466,18 +466,23 @@
           "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
         },
         {
-          "command": "sapling.inlineReview.openPreview",
+          "command": "sapling.inlineReview.showFiles",
           "group": "navigation@24",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.openPreview",
+          "group": "navigation@25",
           "when": "sapling.inlineReview.hasFileChanges && resourceScheme == file"
         },
         {
           "command": "sapling.inlineReview.acceptFile",
-          "group": "navigation@25",
+          "group": "navigation@26",
           "when": "sapling.inlineReview.hasFileChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
         },
         {
           "command": "sapling.inlineReview.rejectFile",
-          "group": "navigation@26",
+          "group": "navigation@27",
           "when": "sapling.inlineReview.hasFileChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
         },
         {

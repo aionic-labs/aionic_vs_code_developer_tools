@@ -4,6 +4,45 @@ import * as vscode from 'vscode';
 import {StaleReviewError} from '../inlineReview/ReviewFile';
 import {ReviewSession} from '../inlineReview/ReviewSession';
 
+jest.mock('../inlineReview/SourceFiles', () => ({
+  SourceFiles: class {
+    discover() {
+      return vscode.workspace.findFiles('**/*');
+    }
+    includes(uri: vscode.Uri) {
+      return Promise.resolve(
+        !uri.path.includes('/node_modules/') && !uri.path.includes('/.tools/'),
+      );
+    }
+  },
+}));
+
+jest.mock('../inlineReview/SnapshotStore', () => {
+  const blobs = new Map<string, string>();
+  class Snapshot {
+    constructor(readonly hash: string) {}
+    read() {
+      return blobs.get(this.hash)!;
+    }
+    matches(text: string) {
+      return text === this.read();
+    }
+  }
+  return {
+    Snapshot,
+    SnapshotStore: class {
+      save(text: string) {
+        const hash = require('node:crypto').createHash('sha256').update(text).digest('hex');
+        blobs.set(hash, text);
+        return Promise.resolve(new Snapshot(hash));
+      }
+      load(hash: string) {
+        return new Snapshot(hash);
+      }
+    },
+  };
+});
+
 jest.mock('vscode', () => {
   const base = jest.requireActual('../../__mocks__/vscode');
   return {
@@ -23,15 +62,21 @@ jest.mock('vscode', () => {
 const uri = vscode.Uri.file('/workspace/example.ts');
 const disk = new Map<string, string>();
 let stored: unknown;
+let storedKey = 'aionic.inlineReview.session.v1';
 let session: ReviewSession;
 let textChanged: (event: vscode.TextDocumentChangeEvent) => void;
 let diskChanged: (uri: vscode.Uri) => void;
+let documentOpened: (document: vscode.TextDocument) => void;
 const update = jest.fn((_key: string, value: unknown) => {
   stored = value;
+  storedKey = _key;
   return Promise.resolve();
 });
-const context = {workspaceState: {get: () => stored, update}} as unknown as vscode.ExtensionContext;
-const logger = {warn: jest.fn()} as unknown as Logger;
+const context = {
+  storageUri: vscode.Uri.file('/test-snapshots'),
+  workspaceState: {get: (key: string) => (key === storedKey ? stored : undefined), update},
+} as unknown as vscode.ExtensionContext;
+const logger = {warn: jest.fn(), info: jest.fn()} as unknown as Logger;
 
 function document(content: string): vscode.TextDocument {
   return {uri, isDirty: true, getText: () => content} as vscode.TextDocument;
@@ -47,6 +92,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   stored = undefined;
+  storedKey = 'aionic.inlineReview.session.v1';
   disk.clear();
   disk.set(uri.toString(), 'original\n');
   Object.assign(vscode.workspace, {
@@ -69,6 +115,10 @@ beforeEach(() => {
       textChanged = listener;
       return new vscode.Disposable(jest.fn());
     },
+    onDidOpenTextDocument: (listener: typeof documentOpened) => {
+      documentOpened = listener;
+      return new vscode.Disposable(jest.fn());
+    },
     fs: {
       stat: jest.fn((candidate: vscode.Uri) => {
         const content = disk.get(candidate.toString());
@@ -87,7 +137,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   session.dispose();
-  await settle();
+  await session.flush();
   jest.useRealTimers();
 });
 
@@ -102,15 +152,70 @@ it('snapshots existing edits as the baseline, then tracks an external write', as
   expect(session.files.get(uri.toString())?.current).toBe('external edit\n');
 });
 
-it('tracks unsaved editor changes and prefers them over disk', async () => {
+it('tracks open files even when the bounded workspace search omits them', async () => {
+  const open = {...document('original\n'), isDirty: false};
+  Object.assign(vscode.workspace, {textDocuments: [open]});
+  jest.mocked(vscode.workspace.findFiles).mockResolvedValue([]);
+  await session.initialize();
+  expect(session.files.has(uri.toString())).toBe(true);
+  expect(session.pending).toHaveLength(0);
+  disk.set(uri.toString(), 'external\n');
+  await session.refresh(uri);
+  expect(session.pending).toHaveLength(1);
+});
+
+it('snapshots a newly opened file instead of treating all of it as a new external file', async () => {
+  jest.mocked(vscode.workspace.findFiles).mockResolvedValue([]);
+  await session.initialize();
+  const open = {...document('original\n'), isDirty: false};
+  Object.assign(vscode.workspace, {textDocuments: [open]});
+  documentOpened(open);
+  await settle();
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+  expect(session.pending).toHaveLength(0);
+});
+
+it('adds an open file beyond the previous memory limit without evicting any file', async () => {
+  const quiet = vscode.Uri.file('/workspace/quiet.txt');
+  const pending = vscode.Uri.file('/workspace/pending.txt');
+  const alsoOpen = vscode.Uri.file('/workspace/open.txt');
+  disk.clear();
+  for (let i = 0; i < 13; i++) {
+    disk.set(vscode.Uri.file(`/workspace/fill-${i}.txt`).toString(), 'x'.repeat(512 * 1024));
+  }
+  for (const candidate of [quiet, pending, alsoOpen]) {
+    disk.set(candidate.toString(), 'x'.repeat(512 * 1024));
+  }
+  await session.initialize();
+  disk.set(pending.toString(), 'pending external change');
+  await session.refresh(pending);
+  disk.set(uri.toString(), 'new editor contents');
+  const open = {...document('new editor contents'), isDirty: false};
+  Object.assign(vscode.workspace, {textDocuments: [open, {uri: alsoOpen, isDirty: false}]});
+  documentOpened(open);
+  // Includes an extra asynchronous disk read to verify the eviction candidate.
+  await settle();
+  await settle();
+  expect(session.files.get(uri.toString())?.baseline).toBe('new editor contents');
+  expect(session.files.has(pending.toString())).toBe(true);
+  expect(session.files.has(alsoOpen.toString())).toBe(true);
+  expect(session.files.size).toBe(17);
+  expect(session.pending).toHaveLength(1);
+});
+
+it('acknowledges unsaved editor changes and prefers them over disk', async () => {
   await session.initialize();
   const dirty = document('unsaved\n');
   Object.assign(vscode.workspace, {textDocuments: [dirty]});
-  textChanged({document: dirty} as vscode.TextDocumentChangeEvent);
+  textChanged({
+    document: dirty,
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: dirty.getText()}],
+  } as unknown as vscode.TextDocumentChangeEvent);
   disk.set(uri.toString(), 'disk edit\n');
   const file = await session.reviewable(uri);
   expect(file.current).toBe('unsaved\n');
-  expect(file.baseline).toBe('original\n');
+  expect(file.baseline).toBe('unsaved\n');
+  expect(session.pending).toHaveLength(0);
 });
 
 it('does not let an earlier disk read overwrite a newer editor event', async () => {
@@ -126,10 +231,96 @@ it('does not let an earlier disk read overwrite a newer editor event', async () 
   await settle();
   const dirty = document('latest typing\n');
   Object.assign(vscode.workspace, {textDocuments: [dirty]});
-  textChanged({document: dirty} as vscode.TextDocumentChangeEvent);
+  textChanged({
+    document: dirty,
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: dirty.getText()}],
+  } as unknown as vscode.TextDocumentChangeEvent);
   finishRead(Buffer.from('stale disk\n'));
   await pending;
   expect(session.files.get(uri.toString())?.current).toBe('latest typing\n');
+});
+
+it('keeps clean document reloads reviewable, even before the watcher fires', async () => {
+  await session.initialize();
+  const clean = {...document('external\n'), isDirty: false};
+  textChanged({
+    document: clean,
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: 'external\n'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+});
+
+it('handles VS Code reporting typing before its separate dirty-state event', async () => {
+  await session.initialize();
+  const doc = {...document('typed\n'), isDirty: false};
+  textChanged({
+    document: doc,
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: 'typed\n'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  doc.isDirty = true;
+  textChanged({document: doc, contentChanges: []} as unknown as vscode.TextDocumentChangeEvent);
+  expect(session.pending).toHaveLength(0);
+  expect(session.files.get(uri.toString())?.baseline).toBe('typed\n');
+});
+
+it('does not recreate review prompts when manual edits are saved', async () => {
+  await session.initialize();
+  const dirty = document('manual\n');
+  Object.assign(vscode.workspace, {textDocuments: [dirty]});
+  textChanged({
+    document: dirty,
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: 'manual\n'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  disk.set(uri.toString(), 'manual\n');
+  Object.assign(vscode.workspace, {textDocuments: []});
+  diskChanged(uri);
+  await settle();
+  expect(session.pending).toHaveLength(0);
+  disk.set(uri.toString(), 'next external\n');
+  diskChanged(uri);
+  await settle();
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(uri.toString())?.baseline).toBe('manual\n');
+});
+
+it('preserves the baseline during Reject and Undo/Redo of the rejection', async () => {
+  await session.initialize();
+  disk.set(uri.toString(), 'external\n');
+  await session.refresh(uri);
+  const change = (text: string, length: number, reason?: number) => {
+    const doc = document(text);
+    Object.assign(vscode.workspace, {textDocuments: [doc]});
+    textChanged({
+      document: doc,
+      reason,
+      contentChanges: [{rangeOffset: 0, rangeLength: length, text}],
+    } as unknown as vscode.TextDocumentChangeEvent);
+  };
+  await session.applyReviewEdit(uri, () => {
+    change('original\n', 9);
+    return Promise.resolve(true);
+  });
+  expect(session.pending).toHaveLength(0);
+  change('external\n', 9, 1);
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
+  change('original\n', 9, 2);
+  expect(session.pending).toHaveLength(0);
+});
+
+it('acknowledges manual Undo without producing a review prompt', async () => {
+  await session.initialize();
+  textChanged({
+    document: document('typed\n'),
+    contentChanges: [{rangeOffset: 0, rangeLength: 9, text: 'typed\n'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  textChanged({
+    document: document('original\n'),
+    reason: 1,
+    contentChanges: [{rangeOffset: 0, rangeLength: 6, text: 'original\n'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  expect(session.pending).toHaveLength(0);
 });
 
 it('persists accepted baselines and preserves unaccepted changes across reloads', async () => {
@@ -204,14 +395,14 @@ it('never rejects using an outdated snapshot while the file is unreadable', asyn
   expect(session.pending).toHaveLength(1);
 });
 
-it('refuses files that grow beyond the text-file limit', async () => {
+it('tracks source files larger than the old 512 KiB limit', async () => {
   await session.initialize();
   disk.set(uri.toString(), 'x'.repeat(512 * 1024 + 1));
-  await expect(session.reviewable(uri)).rejects.toThrow('cannot currently be reviewed');
+  expect((await session.reviewable(uri)).pending).toBe(true);
   expect(session.files.get(uri.toString())?.baseline).toBe('original\n');
 });
 
-it('bounds total snapshot memory when an existing file grows', async () => {
+it('tracks changes beyond the former total snapshot limit', async () => {
   disk.clear();
   for (let i = 0; i < 17; i++) {
     disk.set(vscode.Uri.file(`/workspace/${i}.ts`).toString(), 'x'.repeat(480 * 1024));
@@ -223,7 +414,8 @@ it('bounds total snapshot memory when an existing file grows', async () => {
   disk.set(first.toString(), 'x'.repeat(512 * 1024));
   await session.reviewable(first);
   disk.set(second.toString(), 'x'.repeat(512 * 1024));
-  await expect(session.reviewable(second)).rejects.toThrow('cannot currently be reviewed');
+  expect((await session.reviewable(second)).pending).toBe(true);
+  expect(session.files.size).toBe(17);
 });
 
 it('resumes without acknowledging pending changes', async () => {
@@ -236,7 +428,7 @@ it('resumes without acknowledging pending changes', async () => {
   expect(session.pending).toHaveLength(1);
 });
 
-it('refuses partial acceptance that would create an oversized intermediate baseline', async () => {
+it('allows partial acceptance beyond the previous intermediate-baseline limit', async () => {
   const original = 'a'.repeat(300 * 1024) + '\nstable\n';
   disk.set(uri.toString(), original);
   await session.initialize();
@@ -244,13 +436,41 @@ it('refuses partial acceptance that would create an oversized intermediate basel
   const file = await session.reviewable(uri);
   const insertion = file.hunks.find(hunk => hunk.added.length > 0 && hunk.removed.length === 0);
   expect(insertion).toBeDefined();
-  expect(() => session.accept(uri, insertion!.revision, insertion!.index)).toThrow(
-    'snapshot limit',
-  );
-  expect(file.baseline).toBe(original);
+  session.accept(uri, insertion!.revision, insertion!.index);
+  expect(file.baseline!.length).toBeGreaterThan(512 * 1024);
   const deletion = file.hunks[0];
   session.accept(uri, deletion.revision, deletion.index);
-  const remaining = file.hunks[0];
-  session.accept(uri, remaining.revision, remaining.index);
   expect(file.pending).toBe(false);
+});
+
+it('tracks every file beyond 2,000 and preserves coverage across reloads', async () => {
+  disk.clear();
+  for (let i = 0; i < 2501; i++) {
+    disk.set(vscode.Uri.file(`/workspace/source-${i}.ts`).toString(), `export const n = ${i};\n`);
+  }
+  await session.initialize();
+  expect(session.files.size).toBe(2501);
+  const last = vscode.Uri.file('/workspace/source-2500.ts');
+  disk.set(last.toString(), 'external edit\n');
+  await session.refresh(last);
+  expect(session.pending).toHaveLength(1);
+  await session.flush();
+  expect(JSON.stringify(stored)).not.toContain('export const');
+  session.dispose();
+  await session.flush();
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  expect(session.files.size).toBe(2501);
+  expect(session.pending).toHaveLength(1);
+  expect(session.files.get(last.toString())?.baseline).toBe('export const n = 2500;\n');
+});
+
+it('migrates legacy baselines without accepting pending edits', async () => {
+  stored = {tracking: true, files: [{uri: uri.toString(), baseline: 'legacy\n'}]};
+  await session.initialize();
+  expect(session.files.get(uri.toString())?.baseline).toBe('legacy\n');
+  expect(session.pending).toHaveLength(1);
+  await session.flush();
+  expect(storedKey).toBe('aionic.inlineReview.session.v2');
+  expect(JSON.stringify(stored)).not.toContain('legacy');
 });

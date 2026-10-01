@@ -1,5 +1,6 @@
 /** Local review state. Accepting a hunk changes the baseline, never the working file. */
 import {diffLines, splitLines} from 'shared/diff';
+import {Snapshot, type SnapshotStore} from './SnapshotStore';
 
 export type ReviewHunk = {
   revision: number;
@@ -16,6 +17,8 @@ export type ReviewHunk = {
   added: string;
 };
 
+export type EditorChange = {rangeOffset: number; rangeLength: number; text: string};
+
 export class StaleReviewError extends Error {
   constructor() {
     super(
@@ -28,21 +31,124 @@ export class StaleReviewError extends Error {
 export class ReviewFile {
   private revision = 0;
   private cachedHunks?: ReviewHunk[];
+  private before: string | null | Snapshot;
+  private after: string | null | Snapshot;
 
-  constructor(
-    public baseline: string | null,
-    public current: string | null = baseline,
-  ) {}
+  constructor(baseline: string | null | Snapshot, current: string | null | Snapshot = baseline) {
+    this.before = baseline;
+    this.after = current;
+  }
+
+  get baseline(): string | null {
+    return this.before instanceof Snapshot ? this.before.read() : this.before;
+  }
+
+  set baseline(text: string | null) {
+    this.before = text;
+  }
+
+  get current(): string | null {
+    return this.after instanceof Snapshot ? this.after.read() : this.after;
+  }
+
+  set current(text: string | null) {
+    this.after = text;
+  }
+
+  matchesCurrent(text: string | null): boolean {
+    return this.after instanceof Snapshot
+      ? text != null && this.after.matches(text)
+      : text === this.after;
+  }
+
+  async saveBaseline(store: SnapshotStore): Promise<string | null> {
+    const before = this.before;
+    if (before == null) {
+      return null;
+    }
+    if (before instanceof Snapshot) {
+      if (!this.pending) {
+        this.after = before;
+      }
+      return before.hash;
+    }
+    const snapshot = await store.save(before);
+    // Edits may arrive while writing. Never replace a newer baseline.
+    if (this.before === before) {
+      this.before = snapshot;
+      if (this.matchesCurrent(before)) {
+        this.after = snapshot;
+      }
+    }
+    return snapshot.hash;
+  }
 
   update(content: string | null): void {
-    if (content !== this.current) {
+    if (!this.matchesCurrent(content)) {
       this.current = content;
       this.invalidate();
     }
   }
 
+  /** Apply editor edits to both sides, acknowledging only pending hunks they touch. */
+  editorBaseline(content: string, changes: readonly EditorChange[]): string | undefined {
+    if (this.current == null || changes.length === 0) {
+      return undefined;
+    }
+    const edits = [...changes].sort((a, b) => b.rangeOffset - a.rangeOffset);
+    let expected = this.current;
+    let end = expected.length;
+    for (const edit of edits) {
+      if (edit.rangeOffset < 0 || edit.rangeOffset + edit.rangeLength > end) {
+        return undefined;
+      }
+      expected =
+        expected.slice(0, edit.rangeOffset) +
+        edit.text +
+        expected.slice(edit.rangeOffset + edit.rangeLength);
+      end = edit.rangeOffset;
+    }
+    // A watcher may have advanced the snapshot already. Never map stale offsets.
+    if (expected !== content) {
+      return undefined;
+    }
+    const touched = this.hunks.filter(hunk =>
+      edits.some(edit => {
+        const end = edit.rangeOffset + edit.rangeLength;
+        return edit.rangeLength === 0 || hunk.newOffset === hunk.newEndOffset
+          ? edit.rangeOffset <= hunk.newEndOffset && end >= hunk.newOffset
+          : edit.rangeOffset < hunk.newEndOffset && end > hunk.newOffset;
+      }),
+    );
+    let baseline = this.baseline ?? '';
+    for (const hunk of [...touched].reverse()) {
+      baseline = baseline.slice(0, hunk.oldOffset) + hunk.added + baseline.slice(hunk.oldEndOffset);
+    }
+    const remaining = this.hunks.filter(hunk => !touched.includes(hunk));
+    const baselineOffset = (offset: number) =>
+      offset +
+      remaining
+        .filter(hunk => hunk.newEndOffset <= offset)
+        .reduce((delta, hunk) => delta + hunk.removed.length - hunk.added.length, 0);
+    for (const edit of edits) {
+      baseline =
+        baseline.slice(0, baselineOffset(edit.rangeOffset)) +
+        edit.text +
+        baseline.slice(baselineOffset(edit.rangeOffset + edit.rangeLength));
+    }
+    return baseline;
+  }
+
   get pending(): boolean {
-    return this.baseline !== this.current;
+    if (this.before === this.after) {
+      return false;
+    }
+    if (this.before instanceof Snapshot) {
+      return this.after instanceof Snapshot
+        ? this.before.hash !== this.after.hash
+        : this.after == null || !this.before.matches(this.after);
+    }
+    return !this.matchesCurrent(this.before);
   }
 
   get hunks(): ReviewHunk[] {

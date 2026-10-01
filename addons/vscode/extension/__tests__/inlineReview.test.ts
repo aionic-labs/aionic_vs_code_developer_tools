@@ -11,6 +11,54 @@ function reject(file: ReviewFile, index = 0): void {
 }
 
 describe('local inline review', () => {
+  it('folds typing into the baseline while preserving a separate external hunk', () => {
+    const file = new ReviewFile('one\nstable\nthree\n', 'ONE\nstable\nthree\n');
+    const content = 'ONE\nstable\nmy three\n';
+    const baseline = file.editorBaseline(content, [{rangeOffset: 11, rangeLength: 0, text: 'my '}]);
+    expect(baseline).toBe('one\nstable\nmy three\n');
+    file.baseline = baseline!;
+    file.update(content);
+    reject(file);
+    expect(file.current).toBe('one\nstable\nmy three\n');
+  });
+
+  it('acknowledges a manually rewritten external hunk without accepting other hunks', () => {
+    const file = new ReviewFile('a\nkeep\nc\n', 'AI\nkeep\nC\n');
+    expect(
+      file.editorBaseline('mine\nkeep\nC\n', [{rangeOffset: 0, rangeLength: 2, text: 'mine'}]),
+    ).toBe('mine\nkeep\nc\n');
+  });
+
+  it.each([
+    ['external insertion', 'a\nb\n', 'extra\na\nb\n', 8, 'a\nB\n'],
+    ['external deletion', 'extra\na\nb\n', 'a\nb\n', 2, 'extra\na\nB\n'],
+    ['CRLF and unicode', '🐈\r\nb\r\n', '🐈\r\nAI\r\nb\r\n', 8, '🐈\r\nB\r\n'],
+  ])('maps manual edits after %s', (_, before, current, offset, expected) => {
+    const file = new ReviewFile(before, current);
+    const content = current.slice(0, offset) + 'B' + current.slice(offset + 1);
+    expect(file.editorBaseline(content, [{rangeOffset: offset, rangeLength: 1, text: 'B'}])).toBe(
+      expected,
+    );
+  });
+
+  it('handles multiple editor selections without acknowledging a pending middle hunk', () => {
+    const file = new ReviewFile('a\nkeep\nb\nkeep\nc\n', 'a\nkeep\nB\nkeep\nc\n');
+    expect(
+      file.editorBaseline('A\nkeep\nB\nkeep\nC\n', [
+        {rangeOffset: 0, rangeLength: 1, text: 'A'},
+        {rangeOffset: 14, rangeLength: 1, text: 'C'},
+      ]),
+    ).toBe('A\nkeep\nb\nkeep\nC\n');
+  });
+
+  it('does not acknowledge anything when editor offsets no longer match the snapshot', () => {
+    const file = new ReviewFile('old', 'external');
+    expect(
+      file.editorBaseline('typed', [{rangeOffset: 0, rangeLength: 3, text: 'typed'}]),
+    ).toBeUndefined();
+    expect(file.baseline).toBe('old');
+  });
+
   it('accepts one change without touching the working content or acknowledging another', () => {
     const file = new ReviewFile('one\nstable\nthree\n', 'ONE\nstable\nTHREE\n');
     expect(file.hunks).toHaveLength(2);

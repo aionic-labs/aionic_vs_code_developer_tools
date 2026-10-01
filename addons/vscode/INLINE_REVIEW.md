@@ -1,7 +1,8 @@
 # Aionic inline change review
 
-Review edits from your editor, an AI coding tool, or another process without making
-a commit. This is a local review session, independent of Sapling's working-copy diff.
+Review changes written to disk by an AI coding tool or another process without
+making a commit. Your own editor changes update the baseline automatically. This
+is a local review session, independent of Sapling's working-copy diff.
 
 ## Try the local build
 
@@ -12,14 +13,14 @@ a commit. This is a local review session, independent of Sapling's working-copy 
    `addons/vscode/aionic-sapling-inline-review.vsix` from this checkout.
 3. Reload VS Code and open a trusted local workspace. The package identifies as
    **Aionic Sapling** (`aioniclabs.sapling-scm`), not Meta's extension.
-4. Wait for the status bar to show **Review: 0 files**, then edit a file or let your
-   coding tool change it. Click the status item to list changed files.
+4. Wait for the status bar to show **Review: 0 files**, then let an external coding tool change a file on disk.
+   Typing in VS Code does not create review prompts. Click the status item to list changed files.
 
 Installation is manual: building the package does not install it, publish it, open
 a pull request, or change your other extensions. Use VS Code's UI, not an ambiguous
 `code` shell alias that might point to Cursor.
 
-## Review a change
+## Review and accept a change
 
 The normal editable file shows green changed lines, a red summary of removed text,
 and **Accept**, **Reject**, and **Review −N / +N** controls above each change.
@@ -41,7 +42,7 @@ are never inserted into your working file to render a diff.
   Both require confirmation. Creation/deletion is reviewed as one whole-file change.
 
 Changes are contiguous line-based hunks, not individual keystrokes. Adjacent edits
-may form one hunk. New edits to a previously accepted line appear as new changes.
+may form one hunk. New external edits to a previously accepted line appear as new changes.
 Stale per-change actions are refused if the file changed after the button was shown.
 
 ## Navigate
@@ -56,8 +57,10 @@ Use the editor-title arrows or these default shortcuts (Alt is Option on macOS):
 | Previous changed file | Alt+Shift+[ |
 
 Navigation wraps through pending files in path order. It remains available after
-you finish the current file. The status-bar file picker opens the full inline
-review. Every action is also available under **Aionic Sapling: Inline Review** in
+you finish the current file. Click **Show Unreviewed Files** (the files icon beside
+the arrows) to list all pending files across the workspace, with a change count
+for each. Selecting a file opens its full inline review. The status-bar file picker
+opens the same list. Every action is also available under **Aionic Sapling: Inline Review** in
 the Command Palette, including when a deleted file has no normal editor tab.
 
 ## What is the baseline?
@@ -65,7 +68,15 @@ the Command Palette, including when a deleted file has no normal editor tab.
 On first activation, the extension snapshots eligible files as they currently
 exist, including unsaved open buffers. Existing uncommitted edits become part of
 that starting baseline; this feature does **not** reinterpret them against HEAD.
-Subsequent editor and filesystem changes are compared with those snapshots.
+Subsequent external filesystem changes are compared with those snapshots. Editor
+edits update the baseline as well as the current contents. If you manually rewrite
+a pending hunk, that hunk is acknowledged; unrelated pending hunks remain reviewable.
+Accept/Reject and Undo/Redo of a rejection preserve the review baseline.
+
+VS Code does not expose reliable author information for document edits. This
+distinguishes editor changes from external disk writes, not humans from AI: edits
+applied directly by an AI extension, formatters, and other editor extensions are
+treated like typing. External writes can also come from non-AI tools.
 
 Baselines and tracking state are saved in VS Code's local workspace storage and
 restored after reload. Pending changes made while the editor was closed are detected
@@ -79,21 +90,25 @@ stops discovering new files; already tracked files stay live and reviewable. Set
 Existing snapshots remain available. Disable the extension to stop it completely.
 
 Snapshots contain source text and remain local to VS Code's workspace storage.
-The review feature performs no network calls and invokes no Sapling/Git commands.
+The review feature performs no network calls. It uses read-only Git file-list and
+ignore checks to identify source files; it does not modify Git state.
 Accepting a change is not staging, committing, or submitting it. Existing Sapling
 commands remain separate and retain their usual behavior.
 
 ## Current boundaries
 
 - Trusted **local file** workspaces, including multiple workspace folders.
-- UTF-8 text files up to 512 KiB; at most 2,000 files and a 16 MiB snapshot budget
-  reserved for baselines and current text. Unsupported/excess files are skipped.
-  Initial skips produce a warning; the status tooltip reports skipped files.
-  If accepting an insertion before a deletion would exceed the baseline limit,
-  accept the deletion first or accept the entire file.
-- Symlinks, binary files, and `.git`, `.sl`, `.hg`, `node_modules`, `.venv`, `venv`,
-  `dist`, `build`, `target`, and `__pycache__` directories are excluded. These are
-  explicit exclusions, not an implementation of every repository ignore rule.
+- All tracked and non-ignored UTF-8 source files in workspace Git repositories,
+  including files without open tabs. There is no file-count, per-file-size, or
+  total snapshot-size cutoff. Tracked files remain included even under directories
+  named `build` or covered by ignore rules. New non-ignored files are watched too.
+- Outside repositories, regular text files are included except VCS metadata,
+  dependency/tool directories, and generated `artifacts`, `dist`, `build`, and
+  `target` directories. Binary files and symlinks are not text-reviewable.
+  Unreadable files are reported; the status tooltip shows tracked and skipped counts.
+- Baseline text is stored in immutable local snapshot files in VS Code workspace
+  storage. Unchanged contents are unloaded from memory; the saved workspace state
+  contains snapshot references. Existing baselines migrate without accepting changes.
 - File renames are represented as deletion plus creation. Review is a current
   baseline comparison, not a complete history of every intermediate edit.
 - The full red/green review is read-only. The editable file uses decorations and
@@ -116,7 +131,7 @@ npx --yes yarn@1.22.22 --cwd vscode package-local
 `package-local` builds the extension and webview, then creates a VSIX. It does not
 publish anything. Unit tests cover partial decisions, exact newline preservation,
 creation/deletion, stale actions, dirty buffers, watcher races, persistence, trust,
-and snapshot limits.
+and complete workspace coverage.
 
 An additional real-editor smoke test lives at
 `extension/__tests__/inlineReview.smoke.cjs`. Launch VS Code with this directory as
