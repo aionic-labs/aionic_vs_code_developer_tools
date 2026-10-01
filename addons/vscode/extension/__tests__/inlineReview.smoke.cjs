@@ -83,6 +83,15 @@ exports.run = async function () {
   console.log('PASS full removed/added lines and selected-hunk preview navigation');
 
   await invoke('accept', firstTarget);
+  await lenses(first, 1);
+  const acceptedText = await fs.readFile(first.fsPath, 'utf8');
+  await invoke('undoAccept');
+  await lenses(first, 2);
+  assert.equal(await fs.readFile(first.fsPath, 'utf8'), acceptedText);
+  await invoke('redoAccept');
+  await lenses(first, 1);
+  assert.equal(await fs.readFile(first.fsPath, 'utf8'), acceptedText);
+  console.log('PASS partial acceptance undo/redo from the preview preserves file contents');
   changes = await lenses(first, 1);
   assert.match(await fs.readFile(first.fsPath, 'utf8'), /const one = 10;/);
   await invoke('reject', changes[0].command.arguments[0]);
@@ -129,6 +138,13 @@ exports.run = async function () {
   await vscode.window.showTextDocument(second);
   await invoke('acceptFile');
   await lenses(second, 0);
-  console.log('PASS file acceptance');
+  const acceptedFileText = vscode.window.activeTextEditor.document.getText();
+  await invoke('undoAccept');
+  await lenses(second, 1);
+  await invoke('redoAccept');
+  await lenses(second, 0);
+  assert.equal(vscode.window.activeTextEditor.document.getText(), acceptedFileText);
+  assert.equal(await fs.readFile(second.fsPath, 'utf8'), acceptedFileText);
+  console.log('PASS whole-file acceptance undo/redo from the editable file preserves contents');
   console.log('AIONIC_INLINE_REVIEW_SMOKE_PASSED');
 };
