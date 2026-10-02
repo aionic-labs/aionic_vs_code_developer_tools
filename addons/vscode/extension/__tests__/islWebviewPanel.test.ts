@@ -66,6 +66,22 @@ describe('cwdForOpenISLCommand', () => {
     expect(cwdForOpenISLCommand(webviewUri)).toBeUndefined();
   });
 
+  it('opens the inline review file repository from the editor toolbar', () => {
+    const mockRepo = {info: {repoRoot}} as unknown as Repository;
+    const spy = jest.spyOn(repositoryCache, 'cachedRepositoryForPath').mockReturnValue(mockRepo);
+    const original = vscode.Uri.file(`${repoRoot}/path/to/file.ts`);
+    const preview = original.with({scheme: 'aionic-inline-review', query: original.toString()});
+    expect(cwdForOpenISLCommand(preview)).toBe(repoRoot);
+    expect(spy).toHaveBeenCalledWith(original.fsPath);
+  });
+
+  it('uses the original file path for an inline review without a cached repository', () => {
+    jest.spyOn(repositoryCache, 'cachedRepositoryForPath').mockReturnValue(undefined);
+    const original = vscode.Uri.file(`${repoRoot}/path/to/file.ts`);
+    const preview = original.with({scheme: 'aionic-inline-review', query: original.toString()});
+    expect(cwdForOpenISLCommand(preview)).toBe(original.fsPath);
+  });
+
   it('returns undefined with no argument (keybinding)', () => {
     expect(cwdForOpenISLCommand(undefined)).toBeUndefined();
   });

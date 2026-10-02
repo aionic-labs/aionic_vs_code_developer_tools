@@ -512,8 +512,8 @@
         },
         {
           "command": "sapling.open-isl",
-          "group": "navigation@-100",
-          "when": "config.sapling.isl.showOpenOrFocusButtonOnEditorTitle && isl.showButtonOnEditorTitle"
+          "group": "navigation@19",
+          "when": "config.sapling.isl.showOpenOrFocusButtonOnEditorTitle"
         }
       ],
       "explorer/context": [

@@ -107,6 +107,7 @@ import {
 } from './CommitMessageFields';
 import {DiffStats, PendingDiffStats} from './DiffStats';
 import {FillCommitMessage} from './FillCommitMessage';
+import {OpenInReviewStackButton} from './OpenInReviewStackButton';
 import {CommitTitleByline, getFieldToAutofocus, Section, SmallCapsTitle} from './utils';
 
 import {useFeatureFlagSync} from '../featureFlags';
@@ -396,6 +397,7 @@ export function CommitInfoDetails({commit}: {commit: CommitInfo}) {
                       {!isCommitMode ? (
                         <>
                           <CommitTitleByline commit={commit} />
+                          <OpenInReviewStackButton commit={commit} />
                           {isFoldPreview && <FoldPreviewBanner />}
                           <ShowingRemoteMessageBanner
                             commit={commit}

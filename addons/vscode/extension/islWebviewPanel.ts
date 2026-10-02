@@ -178,7 +178,9 @@ export function cwdForOpenISLCommand(arg: unknown): string | undefined {
   // The editor/title menu passes the active tab's Uri; map it back to its repo root.
   // The button is contributed for every tab, so this may be any kind of tab, not just a file.
   if (arg instanceof vscode.Uri) {
-    const uri = workingCopyUriForModifiedUri(arg);
+    const uri = workingCopyUriForModifiedUri(
+      arg.scheme === 'aionic-inline-review' ? vscode.Uri.parse(arg.query) : arg,
+    );
     const repoRoot = repositoryCache.cachedRepositoryForPath(uri.fsPath)?.info.repoRoot;
     if (repoRoot != null) {
       return repoRoot;
