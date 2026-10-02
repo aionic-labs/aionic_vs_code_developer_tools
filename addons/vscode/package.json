@@ -1,9 +1,9 @@
 {
   "name": "sapling-scm",
-  "displayName": "Sapling SCM",
-  "description": "Sapling: A Scalable, User-Friendly Source Control System",
+  "displayName": "Aionic Sapling",
+  "description": "Sapling source control with local inline change review for Aionic.",
   "version": "0.1.71",
-  "publisher": "meta",
+  "publisher": "aioniclabs",
   "license": "MIT",
   "engines": {
     "vscode": "^1.86.0"
@@ -20,27 +20,29 @@
   "extensionKind": [
     "workspace"
   ],
-  "enabledApiProposals": [
-    "contribMultiDiffEditorMenus"
-  ],
   "galleryBanner": {
     "color": "#2e8555",
     "theme": "dark"
   },
   "main": "./dist/extension.js",
   "icon": "resources/extensionIcon.png",
-  "homepage": "https://sapling-scm.com/",
+  "homepage": "https://github.com/aionic-labs/sapling",
   "bugs": {
-    "url": "https://github.com/facebook/sapling/issues"
+    "url": "https://github.com/aionic-labs/sapling/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/facebook/sapling"
+    "url": "https://github.com/aionic-labs/sapling"
   },
   "contributes": {
     "configuration": {
       "title": "Sapling",
       "properties": {
+        "sapling.inlineReview.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically snapshot this trusted workspace for local inline review. Applies on extension reload. Accepting changes does not stage, commit, or submit them."
+        },
         "sapling.commandPath": {
           "type": "string",
           "default": "",
@@ -170,6 +172,78 @@
       ]
     },
     "commands": [
+      {
+        "command": "sapling.inlineReview.start",
+        "title": "Inline Review: Start Tracking",
+        "category": "Aionic Sapling",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "sapling.inlineReview.pause",
+        "title": "Inline Review: Pause New File Tracking",
+        "category": "Aionic Sapling",
+        "icon": "$(debug-pause)"
+      },
+      {
+        "command": "sapling.inlineReview.accept",
+        "title": "Inline Review: Accept Change",
+        "category": "Aionic Sapling",
+        "icon": "$(check)"
+      },
+      {
+        "command": "sapling.inlineReview.reject",
+        "title": "Inline Review: Reject Change",
+        "category": "Aionic Sapling",
+        "icon": "$(close)"
+      },
+      {
+        "command": "sapling.inlineReview.acceptFile",
+        "title": "Inline Review: Accept All Changes in File",
+        "category": "Aionic Sapling",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "sapling.inlineReview.rejectFile",
+        "title": "Inline Review: Reject All Changes in File",
+        "category": "Aionic Sapling",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "sapling.inlineReview.previousChange",
+        "title": "Inline Review: Previous Change",
+        "category": "Aionic Sapling",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "sapling.inlineReview.nextChange",
+        "title": "Inline Review: Next Change",
+        "category": "Aionic Sapling",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "sapling.inlineReview.previousFile",
+        "title": "Inline Review: Previous Changed File",
+        "category": "Aionic Sapling",
+        "icon": "$(chevron-left)"
+      },
+      {
+        "command": "sapling.inlineReview.nextFile",
+        "title": "Inline Review: Next Changed File",
+        "category": "Aionic Sapling",
+        "icon": "$(chevron-right)"
+      },
+      {
+        "command": "sapling.inlineReview.openPreview",
+        "title": "Inline Review: Open Inline Review",
+        "category": "Aionic Sapling",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "sapling.inlineReview.showFiles",
+        "title": "Inline Review: Show Unreviewed Files",
+        "category": "Aionic Sapling",
+        "icon": "$(files)"
+      },
       {
         "command": "sapling.revert-file",
         "title": "%sapling.revert-file-command%",
@@ -309,6 +383,26 @@
     ],
     "keybindings": [
       {
+        "command": "sapling.inlineReview.nextChange",
+        "key": "alt+]",
+        "when": "editorTextFocus && sapling.inlineReview.hasChanges"
+      },
+      {
+        "command": "sapling.inlineReview.previousChange",
+        "key": "alt+[",
+        "when": "editorTextFocus && sapling.inlineReview.hasChanges"
+      },
+      {
+        "command": "sapling.inlineReview.nextFile",
+        "key": "alt+shift+]",
+        "when": "editorTextFocus && sapling.inlineReview.hasChanges"
+      },
+      {
+        "command": "sapling.inlineReview.previousFile",
+        "key": "alt+shift+[",
+        "when": "editorTextFocus && sapling.inlineReview.hasChanges"
+      },
+      {
         "command": "sapling.open-comparison-view-uncommitted",
         "key": "ctrl-'",
         "mac": "cmd-'",
@@ -351,6 +445,46 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "sapling.inlineReview.previousChange",
+          "group": "navigation@20",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.nextChange",
+          "group": "navigation@21",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.previousFile",
+          "group": "navigation@22",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.nextFile",
+          "group": "navigation@23",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.showFiles",
+          "group": "navigation@24",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.openPreview",
+          "group": "navigation@25",
+          "when": "sapling.inlineReview.hasFileChanges && resourceScheme == file"
+        },
+        {
+          "command": "sapling.inlineReview.acceptFile",
+          "group": "navigation@26",
+          "when": "sapling.inlineReview.hasFileChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.rejectFile",
+          "group": "navigation@27",
+          "when": "sapling.inlineReview.hasFileChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
         {
           "command": "sapling.open-isl",
           "group": "navigation@-100",
@@ -458,13 +592,6 @@
           "group": "navigation",
           "when": "scmProvider == sapling"
         }
-      ],
-      "multiDiffEditor/resource/title": [
-        {
-          "command": "sapling.open-multi-diff-file-head",
-          "group": "navigation@1",
-          "when": "resourceScheme == sapling-comparison-committed"
-        }
       ]
     }
   },
@@ -475,6 +602,7 @@
     "watch-webview": "vite",
     "build-extension": "rolldown -c rolldown.extension.config.ts --environment NODE_ENV:production",
     "build-webview": "vite build",
+    "package-local": "vsce package --no-dependencies --out aionic-sapling-inline-review.vsix",
     "vscode:prepublish": "node ./buildForPublish.js"
   },
   "devDependencies": {

@@ -1,4 +1,11 @@
-# Sapling SCM
+# Aionic Sapling
+
+This Aionic fork adds local inline change review: per-change Accept/Reject controls,
+red/green previews, and navigation between changes and files. See
+[Inline Review](./INLINE_REVIEW.md) for setup, shortcuts, snapshot semantics, and limits.
+
+The extension retains the Sapling integrations below. Local review does not stage,
+commit, push, or submit changes.
 
 [Sapling](https://sapling-scm.com/) is a Scalable, User-Friendly Source Control System.
 
