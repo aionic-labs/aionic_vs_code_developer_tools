@@ -36,6 +36,13 @@ are never inserted into your working file to render a diff.
 - **Reject** restores just that change's previous content using VS Code's edit API.
   Text edits remain unsaved and support normal editor undo/redo.
 - **Accept All Changes in File** acknowledges the current file.
+- **Undo Accept in File** and **Redo Accept in File** reverse or reapply the current
+  file's acceptance decisions, including Accept All, without changing file contents.
+  Use the curved-arrow buttons in the editor title or the Command Palette. They work
+  in both the editable file and the inline preview, even after every change is accepted.
+  This is separate from normal text Undo/Redo (Cmd+Z / Shift+Cmd+Z on macOS).
+  Acceptance history lasts until the window reloads or manual edits rebase that file;
+  a new acceptance clears its redo history. Later external edits remain untouched.
 - **Reject All Changes in File** restores the remaining unaccepted changes after
   confirmation. Previously accepted changes stay intact.
 - New-file rejection deletes that file; deleted-file rejection recreates it.

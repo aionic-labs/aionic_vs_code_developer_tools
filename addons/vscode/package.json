@@ -246,6 +246,20 @@
         "icon": "$(files)"
       },
       {
+        "command": "sapling.inlineReview.undoAccept",
+        "title": "Inline Review: Undo Accept in File",
+        "category": "Aionic Sapling",
+        "icon": "$(discard)",
+        "enablement": "sapling.inlineReview.canUndoAccept"
+      },
+      {
+        "command": "sapling.inlineReview.redoAccept",
+        "title": "Inline Review: Redo Accept in File",
+        "category": "Aionic Sapling",
+        "icon": "$(redo)",
+        "enablement": "sapling.inlineReview.canRedoAccept"
+      },
+      {
         "command": "sapling.revert-file",
         "title": "%sapling.revert-file-command%",
         "category": "%sapling.command-category%",
@@ -446,6 +460,16 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "sapling.inlineReview.undoAccept",
+          "group": "navigation@28",
+          "when": "sapling.inlineReview.canUndoAccept && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.redoAccept",
+          "group": "navigation@29",
+          "when": "sapling.inlineReview.canRedoAccept && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
         {
           "command": "sapling.inlineReview.previousChange",
           "group": "navigation@20",

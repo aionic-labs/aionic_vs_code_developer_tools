@@ -33,6 +33,8 @@ export class ReviewFile {
   private cachedHunks?: ReviewHunk[];
   private before: string | null | Snapshot;
   private after: string | null | Snapshot;
+  private readonly acceptedUndo: Array<string | null | Snapshot> = [];
+  private readonly acceptedRedo: Array<string | null | Snapshot> = [];
 
   constructor(baseline: string | null | Snapshot, current: string | null | Snapshot = baseline) {
     this.before = baseline;
@@ -44,7 +46,41 @@ export class ReviewFile {
   }
 
   set baseline(text: string | null) {
+    // A manual edit rebases the review. Old decisions must not restore that old baseline.
+    this.acceptedUndo.length = 0;
+    this.acceptedRedo.length = 0;
     this.before = text;
+  }
+
+  get canUndoAccept(): boolean {
+    return this.acceptedUndo.length > 0;
+  }
+
+  get canRedoAccept(): boolean {
+    return this.acceptedRedo.length > 0;
+  }
+
+  undoAccept(): void {
+    if (this.canUndoAccept) {
+      this.acceptedRedo.push(this.before);
+      this.before = this.acceptedUndo.pop()!;
+      this.invalidate();
+    }
+  }
+
+  redoAccept(): void {
+    if (this.canRedoAccept) {
+      this.acceptedUndo.push(this.before);
+      this.before = this.acceptedRedo.pop()!;
+      this.invalidate();
+    }
+  }
+
+  private recordAccept(baseline: string | null | Snapshot): void {
+    this.acceptedUndo.push(this.before);
+    this.acceptedRedo.length = 0;
+    this.before = baseline;
+    this.invalidate();
   }
 
   get current(): string | null {
@@ -198,8 +234,7 @@ export class ReviewFile {
   }
 
   accept(revision: number, index: number): void {
-    this.baseline = this.acceptedContent(revision, index);
-    this.invalidate();
+    this.recordAccept(this.acceptedContent(revision, index));
   }
 
   acceptedContent(revision: number, index: number): string | null {
@@ -213,8 +248,9 @@ export class ReviewFile {
   }
 
   acceptAll(): void {
-    this.baseline = this.current;
-    this.invalidate();
+    if (this.pending) {
+      this.recordAccept(this.after);
+    }
   }
 
   /** Preview only. The controller applies the edit through VS Code's undoable edit API. */

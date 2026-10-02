@@ -11,6 +11,101 @@ function reject(file: ReviewFile, index = 0): void {
 }
 
 describe('local inline review', () => {
+  it('undoes and redoes partial accepts in order without changing the working file', () => {
+    const file = new ReviewFile('one\nstable\nthree\n', 'ONE\nstable\nTHREE\n');
+    const content = file.current;
+    accept(file);
+    const remaining = file.hunks[0];
+    accept(file);
+    expect(file.pending).toBe(false);
+    file.undoAccept();
+    expect(file.baseline).toBe('ONE\nstable\nthree\n');
+    expect(file.hunks).toHaveLength(1);
+    expect(() => file.resolve(remaining.revision, remaining.index)).toThrow(StaleReviewError);
+    file.undoAccept();
+    expect(file.baseline).toBe('one\nstable\nthree\n');
+    expect(file.canUndoAccept).toBe(false);
+    file.redoAccept();
+    expect(file.hunks).toHaveLength(1);
+    file.redoAccept();
+    expect(file.pending).toBe(false);
+    expect(file.canRedoAccept).toBe(false);
+    expect(file.current).toBe(content);
+  });
+
+  it.each([
+    ['text', 'old\r\n🐈', 'new\r\n🐕'],
+    ['new file', null, 'new\n'],
+    ['new empty file', null, ''],
+    ['deleted file', 'old\n', null],
+    ['deleted empty file', '', null],
+  ])('undoes and redoes Accept All for a %s without touching contents', (_, before, current) => {
+    const file = new ReviewFile(before, current);
+    file.acceptAll();
+    expect(file.pending).toBe(false);
+    file.undoAccept();
+    expect(file.baseline).toBe(before);
+    expect(file.pending).toBe(true);
+    file.redoAccept();
+    expect(file.baseline).toBe(current);
+    expect(file.current).toBe(current);
+  });
+
+  it('preserves later external changes when undoing and redoing acceptance', () => {
+    const file = new ReviewFile('old\n', 'accepted\n');
+    file.acceptAll();
+    file.update('new external edit\n');
+    file.undoAccept();
+    expect(file.baseline).toBe('old\n');
+    file.redoAccept();
+    expect(file.baseline).toBe('accepted\n');
+    expect(file.current).toBe('new external edit\n');
+    expect(file.pending).toBe(true);
+  });
+
+  it('clears redo on a new decision and does not record no-op accepts', () => {
+    const file = new ReviewFile('one\nstable\nthree\n', 'ONE\nstable\nTHREE\n');
+    accept(file);
+    file.undoAccept();
+    accept(file, 1);
+    expect(file.canRedoAccept).toBe(false);
+    file.acceptAll();
+    file.acceptAll();
+    file.undoAccept();
+    expect(file.hunks).toHaveLength(1);
+    file.undoAccept();
+    expect(file.hunks).toHaveLength(2);
+    expect(file.canUndoAccept).toBe(false);
+    file.undoAccept();
+    expect(file.hunks).toHaveLength(2);
+  });
+
+  it('clears acceptance history when manual edits rebase a file', () => {
+    const file = new ReviewFile('old\n', 'accepted\n');
+    file.acceptAll();
+    file.undoAccept();
+    file.baseline = 'manual\n';
+    file.update('manual\n');
+    expect(file.canRedoAccept).toBe(false);
+    expect(file.canUndoAccept).toBe(false);
+    file.redoAccept();
+    expect(file.baseline).toBe('manual\n');
+  });
+
+  it('keeps acceptance history independent for each file and rejects stale accepts', () => {
+    const first = new ReviewFile('one', 'ONE');
+    const second = new ReviewFile('two', 'TWO');
+    const target = first.hunks[0];
+    first.acceptAll();
+    second.acceptAll();
+    first.undoAccept();
+    expect(second.canUndoAccept).toBe(true);
+    expect(second.pending).toBe(false);
+    expect(() => first.accept(target.revision, target.index)).toThrow(StaleReviewError);
+    expect(first.canRedoAccept).toBe(true);
+    expect(first.canUndoAccept).toBe(false);
+  });
+
   it('folds typing into the baseline while preserving a separate external hunk', () => {
     const file = new ReviewFile('one\nstable\nthree\n', 'ONE\nstable\nthree\n');
     const content = 'ONE\nstable\nmy three\n';

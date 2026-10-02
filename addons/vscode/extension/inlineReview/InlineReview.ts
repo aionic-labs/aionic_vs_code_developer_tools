@@ -82,6 +82,8 @@ export class InlineReview
     this.command('accept', target => this.accept(target));
     this.command('reject', target => this.reject(target));
     this.command('acceptFile', () => this.acceptFile());
+    this.command('undoAccept', () => this.changeAcceptance('undoAccept'));
+    this.command('redoAccept', () => this.changeAcceptance('redoAccept'));
     this.command('rejectFile', () => this.rejectFile());
     this.command('nextChange', () => this.navigateChange(1));
     this.command('previousChange', () => this.navigateChange(-1));
@@ -97,6 +99,8 @@ export class InlineReview
     void vscode.commands.executeCommand('setContext', 'sapling.inlineReview.hasChanges', false);
     void vscode.commands.executeCommand('setContext', 'sapling.inlineReview.hasFileChanges', false);
     void vscode.commands.executeCommand('setContext', 'sapling.inlineReview.tracking', false);
+    void vscode.commands.executeCommand('setContext', 'sapling.inlineReview.canUndoAccept', false);
+    void vscode.commands.executeCommand('setContext', 'sapling.inlineReview.canRedoAccept', false);
   }
 
   provideTextDocumentContent(uri: vscode.Uri): string {
@@ -246,6 +250,12 @@ export class InlineReview
     if (first != null) {
       await this.replaceFile(uri, this.target(uri.toString(), first), file.baseline);
     }
+  }
+
+  private async changeAcceptance(action: 'undoAccept' | 'redoAccept'): Promise<void> {
+    const file = await this.session.reviewable(this.activeUri());
+    file[action]();
+    this.session.notify();
   }
 
   private async replaceFile(
@@ -431,6 +441,16 @@ export class InlineReview
       active == null
         ? undefined
         : this.session.files.get(this.originalUri(active.document.uri).toString());
+    void vscode.commands.executeCommand(
+      'setContext',
+      'sapling.inlineReview.canUndoAccept',
+      this.session.isEnabled && (activeFile?.canUndoAccept ?? false),
+    );
+    void vscode.commands.executeCommand(
+      'setContext',
+      'sapling.inlineReview.canRedoAccept',
+      this.session.isEnabled && (activeFile?.canRedoAccept ?? false),
+    );
     void vscode.commands.executeCommand(
       'setContext',
       'sapling.inlineReview.hasChanges',

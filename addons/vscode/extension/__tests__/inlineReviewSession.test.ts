@@ -405,6 +405,45 @@ it('preserves the baseline during Reject and Undo/Redo of the rejection', async 
   expect(session.pending).toHaveLength(0);
 });
 
+it('persists an undone acceptance across reload, without persisting the undo stack', async () => {
+  await session.initialize();
+  disk.set(uri.toString(), 'external\n');
+  const file = (await session.refresh(uri))!;
+  file.acceptAll();
+  await session.flush();
+  file.undoAccept();
+  expect(file.current).toBe('external\n');
+  expect(file.baseline).toBe('original\n');
+  session.notify();
+  await session.flush();
+  session.dispose();
+  await session.flush();
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  const restored = session.files.get(uri.toString())!;
+  expect(restored.baseline).toBe('original\n');
+  expect(restored.current).toBe('external\n');
+  expect(restored.pending).toBe(true);
+  expect(restored.canUndoAccept).toBe(false);
+  expect(restored.canRedoAccept).toBe(false);
+});
+
+it('invalidates acceptance history when manual typing changes the baseline', async () => {
+  await session.initialize();
+  disk.set(uri.toString(), 'external\n');
+  const file = (await session.refresh(uri))!;
+  file.acceptAll();
+  textChanged({
+    document: document('manual\n'),
+    contentChanges: [{rangeOffset: 0, rangeLength: 8, text: 'manual'}],
+  } as unknown as vscode.TextDocumentChangeEvent);
+  expect(file.canUndoAccept).toBe(false);
+  expect(file.canRedoAccept).toBe(false);
+  expect(file.baseline).toBe('manual\n');
+  file.undoAccept();
+  expect(file.pending).toBe(false);
+});
+
 it('acknowledges manual Undo without producing a review prompt', async () => {
   await session.initialize();
   textChanged({
