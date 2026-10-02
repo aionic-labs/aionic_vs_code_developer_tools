@@ -216,6 +216,20 @@
         "icon": "$(arrow-up)"
       },
       {
+        "command": "sapling.inlineReview.acceptAllFiles",
+        "title": "Inline Review: Accept All Changes in All Files",
+        "category": "Aionic Sapling",
+        "icon": "$(checklist)",
+        "enablement": "sapling.inlineReview.hasChanges"
+      },
+      {
+        "command": "sapling.inlineReview.rejectAllFiles",
+        "title": "Inline Review: Reject All Changes in All Files",
+        "category": "Aionic Sapling",
+        "icon": "$(clear-all)",
+        "enablement": "sapling.inlineReview.hasChanges"
+      },
+      {
         "command": "sapling.inlineReview.nextChange",
         "title": "Inline Review: Next Change",
         "category": "Aionic Sapling",
@@ -460,6 +474,16 @@
         }
       ],
       "editor/title": [
+        {
+          "command": "sapling.inlineReview.acceptAllFiles",
+          "group": "navigation@30",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
+        {
+          "command": "sapling.inlineReview.rejectAllFiles",
+          "group": "navigation@31",
+          "when": "sapling.inlineReview.hasChanges && (resourceScheme == file || resourceScheme == aionic-inline-review)"
+        },
         {
           "command": "sapling.inlineReview.undoAccept",
           "group": "navigation@28",
