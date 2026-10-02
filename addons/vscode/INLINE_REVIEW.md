@@ -85,9 +85,16 @@ restart becomes a new baseline, rather than an inferred file-creation event.
 
 **Start Tracking** adds snapshots for currently untracked files and resumes watching
 for new files without acknowledging existing changes. **Pause New File Tracking**
-stops discovering new files; already tracked files stay live and reviewable. Set
-`sapling.inlineReview.enabled` to `false` and reload to prevent automatic discovery.
-Existing snapshots remain available. Disable the extension to stop it completely.
+stops discovering new files; already tracked files stay live and reviewable.
+
+Tracking is enabled by default. To disable it completely, turn off
+**Sapling › Inline Review: Enabled** in VS Code Settings, or set
+`"sapling.inlineReview.enabled": false` in your user or workspace settings.
+The setting persists across reloads and applies immediately: disk and editor events
+stop updating the session, and review controls and the status item are hidden.
+Saved baselines are preserved. Re-enabling resumes review against those baselines,
+including changes made while tracking was disabled. **Start Tracking** requires
+this setting to be enabled.
 
 Snapshots contain source text and remain local to VS Code's workspace storage.
 The review feature performs no network calls. It uses read-only Git file-list and
