@@ -165,5 +165,21 @@ exports.run = async function () {
   await invoke('undoAccept');
   await lenses(second, 1);
   console.log('PASS workspace acceptance includes closed files and remains undoable per file');
+  // An open file list must not hold the review command queue until it is dismissed.
+  await Promise.race([
+    invoke('showFiles').then(() => invoke('acceptAllFiles')),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('File picker blocked Accept All')), 5000),
+    ),
+  ]);
+  await lenses(first, 0);
+  await lenses(second, 0);
+  await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
+  await invoke('showFiles');
+  await lenses(first, 0);
+  await lenses(second, 0);
+  console.log(
+    'PASS open pending-file picker does not block Accept All or restore accepted changes',
+  );
   console.log('AIONIC_INLINE_REVIEW_SMOKE_PASSED');
 };

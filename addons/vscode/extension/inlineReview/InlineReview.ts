@@ -4,6 +4,7 @@ import type {ReviewHunk} from './ReviewFile';
 
 import * as vscode from 'vscode';
 import {reviewAllFiles} from './BulkReview';
+import {PendingFilesPicker} from './PendingFilesPicker';
 import {inlineReviewLines, StaleReviewError} from './ReviewFile';
 import {ReviewSession} from './ReviewSession';
 
@@ -15,6 +16,7 @@ export class InlineReview
   implements vscode.Disposable, vscode.CodeLensProvider, vscode.TextDocumentContentProvider
 {
   private readonly session: ReviewSession;
+  private readonly filePicker: PendingFilesPicker;
   private readonly disposables: vscode.Disposable[] = [];
   private readonly lensesChanged = new vscode.EventEmitter<void>();
   private readonly previewChanged = new vscode.EventEmitter<vscode.Uri>();
@@ -47,10 +49,14 @@ export class InlineReview
     private readonly logger: Logger,
   ) {
     this.session = new ReviewSession(context, logger);
+    this.filePicker = new PendingFilesPicker(this.session, key => {
+      void this.run(() => this.openPreview(key));
+    });
     this.status.name = 'Aionic Inline Review';
     this.status.command = COMMAND + 'showFiles';
     this.disposables.push(
       this.session,
+      this.filePicker,
       this.status,
       this.added,
       this.removed,
@@ -97,7 +103,7 @@ export class InlineReview
     this.command('previousChange', () => this.navigateChange(-1));
     this.command('nextFile', () => this.navigateFile(1));
     this.command('previousFile', () => this.navigateFile(-1));
-    this.command('showFiles', () => this.showFiles());
+    this.command('showFiles', () => this.filePicker.show());
     this.command('openPreview', target => this.openPreview(target?.uri, target));
     this.run(() => this.session.initialize());
   }
@@ -402,28 +408,6 @@ export class InlineReview
     const hunk = target == null ? file.hunks[0] : file.resolve(target.revision, target.index);
     if (hunk != null) {
       await this.showChange(uri.toString(), hunk, true);
-    }
-  }
-
-  private async showFiles(): Promise<void> {
-    const items = this.session.pending.map(([key, file]) => ({
-      label: vscode.workspace.asRelativePath(vscode.Uri.parse(key), true),
-      description: `${file.hunks.length} change(s)${file.current == null ? ' · deleted' : file.baseline == null ? ' · new' : ''}`,
-      key,
-    }));
-    if (items.length === 0) {
-      void vscode.window.showInformationMessage(
-        this.session.tracking
-          ? 'No unreviewed changes since tracking started.'
-          : 'Inline review is paused. Use Start Tracking to snapshot and watch your workspace.',
-      );
-      return;
-    }
-    const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Review local changes — accepting does not commit them',
-    });
-    if (selected != null) {
-      await this.openPreview(selected.key);
     }
   }
 
