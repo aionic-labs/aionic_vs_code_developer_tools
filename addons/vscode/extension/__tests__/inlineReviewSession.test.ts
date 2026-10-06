@@ -6,6 +6,9 @@ import {ReviewSession} from '../inlineReview/ReviewSession';
 
 jest.mock('../inlineReview/SourceFiles', () => ({
   SourceFiles: class {
+    committedBaseline(uri: vscode.Uri) {
+      return Promise.resolve(mockCommitted.get(uri.toString()));
+    }
     discover() {
       return vscode.workspace.findFiles('**/*');
     }
@@ -61,6 +64,7 @@ jest.mock('vscode', () => {
 
 const uri = vscode.Uri.file('/workspace/example.ts');
 const disk = new Map<string, string>();
+const mockCommitted = new Map<string, string>();
 let stored: unknown;
 let storedKey = 'aionic.inlineReview.session.v1';
 let session: ReviewSession;
@@ -96,6 +100,7 @@ beforeEach(() => {
   enabled = true;
   storedKey = 'aionic.inlineReview.session.v1';
   disk.clear();
+  mockCommitted.clear();
   disk.set(uri.toString(), 'original\n');
   Object.assign(vscode.workspace, {
     isTrusted: true,
@@ -609,4 +614,86 @@ it('migrates legacy baselines without accepting pending edits', async () => {
   await session.flush();
   expect(storedKey).toBe('aionic.inlineReview.session.v2');
   expect(JSON.stringify(stored)).not.toContain('legacy');
+});
+
+it('repairs a saved missing baseline into separate reviewable hunks and persists the repair', async () => {
+  stored = {tracking: true, files: [{uri: uri.toString(), baseline: null}]};
+  const before = 'one\nunchanged\nthree\n';
+  mockCommitted.set(uri.toString(), before);
+  disk.set(uri.toString(), 'ONE\nunchanged\nTHREE\n');
+  await session.initialize();
+  const file = session.files.get(uri.toString())!;
+  expect(file.baseline).toBe(before);
+  expect(file.hunks).toHaveLength(2);
+  const first = file.hunks[0];
+  session.accept(uri, first.revision, first.index);
+  expect(file.hunks).toHaveLength(1);
+  expect(file.baseline).toBe('ONE\nunchanged\nthree\n');
+  await session.flush();
+  session.dispose();
+  await session.flush();
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  const restored = session.files.get(uri.toString())!;
+  expect(restored.baseline).toBe('ONE\nunchanged\nthree\n');
+  expect(restored.hunks).toHaveLength(1);
+  const last = restored.hunks[0];
+  expect(restored.rejectedContent(last.revision, last.index)).toBe('ONE\nunchanged\nthree\n');
+});
+
+it('uses the commit for an existing file first seen by a watcher', async () => {
+  await session.initialize();
+  const other = vscode.Uri.file('/workspace/previously-unseen.ts');
+  mockCommitted.set(other.toString(), 'a\nkeep\nb\n');
+  disk.set(other.toString(), 'A\nkeep\nB\n');
+  const file = (await session.refresh(other))!;
+  expect(file.hunks).toHaveLength(2);
+  expect(file.baseline).toBe('a\nkeep\nb\n');
+});
+
+it('uses the same committed fallback when opening the file wins the watcher race', async () => {
+  await session.initialize();
+  const other = vscode.Uri.file('/workspace/previously-unseen.ts');
+  mockCommitted.set(other.toString(), 'a\nkeep\nb\n');
+  disk.set(other.toString(), 'A\nkeep\nB\n');
+  documentOpened({uri: other} as vscode.TextDocument);
+  await settle();
+  const file = session.files.get(other.toString())!;
+  expect(file.baseline).toBe('a\nkeep\nb\n');
+  expect(file.hunks).toHaveLength(2);
+});
+
+it('does not replace saved review decisions with HEAD', async () => {
+  stored = {tracking: true, files: [{uri: uri.toString(), baseline: 'accepted\n'}]};
+  mockCommitted.set(uri.toString(), 'older committed version\n');
+  disk.set(uri.toString(), 'next edit\n');
+  await session.initialize();
+  expect(session.files.get(uri.toString())!.baseline).toBe('accepted\n');
+});
+
+it('keeps genuinely new files as creations when there is no committed version', async () => {
+  stored = {tracking: true, files: [{uri: uri.toString(), baseline: null}]};
+  await session.initialize();
+  const file = session.files.get(uri.toString())!;
+  expect(file.baseline).toBeNull();
+  expect(file.hunks).toHaveLength(1);
+  expect(file.needsBaselineRecovery).toBe(false);
+});
+
+it('does not resurrect an accepted deletion when a file is recreated after reload', async () => {
+  mockCommitted.set(uri.toString(), 'original\n');
+  await session.initialize();
+  disk.delete(uri.toString());
+  const file = (await session.refresh(uri))!;
+  file.acceptAll();
+  await session.flush();
+  session.dispose();
+  await session.flush();
+  disk.set(uri.toString(), 'recreated\n');
+  session = new ReviewSession(context, logger);
+  await session.initialize();
+  const restored = session.files.get(uri.toString())!;
+  expect(restored.baseline).toBeNull();
+  expect(restored.current).toBe('recreated\n');
+  expect(restored.needsBaselineRecovery).toBe(false);
 });

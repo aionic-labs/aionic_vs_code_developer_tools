@@ -52,6 +52,41 @@ export class SourceFiles {
   private readonly repositories = new Set<string>();
   private readonly known = new Set<string>();
 
+  /** Read HEAD without staging, resetting, or changing the working file. */
+  committedBaseline(uri: vscode.Uri): Promise<string | undefined> {
+    return new Promise(resolve => {
+      const child = spawn(
+        'git',
+        [
+          '-C',
+          path.dirname(uri.fsPath),
+          'show',
+          '--no-ext-diff',
+          '--no-textconv',
+          `HEAD:./${path.basename(uri.fsPath)}`,
+        ],
+        {stdio: ['ignore', 'pipe', 'ignore']},
+      );
+      const chunks: Buffer[] = [];
+      child.stdout.on('data', (data: Buffer) => chunks.push(data));
+      child.on('error', () => resolve(undefined));
+      child.on('close', code => {
+        if (code !== 0) {
+          resolve(undefined);
+          return;
+        }
+        const bytes = Buffer.concat(chunks);
+        try {
+          resolve(
+            bytes.includes(0) ? undefined : new TextDecoder('utf-8', {fatal: true}).decode(bytes),
+          );
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+  }
+
   async discover(): Promise<vscode.Uri[]> {
     const found = new Set<string>();
     const visit = async (directory: string): Promise<void> => {

@@ -11,10 +11,13 @@ const STORAGE_KEY = 'aionic.inlineReview.session.v2';
 const LEGACY_STORAGE_KEY = 'aionic.inlineReview.session.v1';
 const EXCLUDED_DIRECTORIES = new Set(['.git', '.sl', '.hg']);
 
-type StoredSession = {tracking: boolean; files: Array<{uri: string; baseline: string | null}>};
+type StoredSession = {
+  tracking: boolean;
+  files: Array<{uri: string; baseline: string | null; baselineRecovery?: boolean}>;
+};
 // v2 baselines are content hashes; v1 baselines were source text in workspaceState.
 
-/** Workspace-local snapshots. Git is used only for source-file discovery. */
+/** Workspace-local snapshots, with read-only Git discovery and missing-baseline recovery. */
 export class ReviewSession implements vscode.Disposable {
   readonly files = new Map<string, ReviewFile>();
   readonly onDidChange: vscode.Event<void>;
@@ -168,7 +171,14 @@ export class ReviewSession implements vscode.Disposable {
               current != null && item.baseline != null
                 ? this.snapshots.load(item.baseline)
                 : item.baseline;
-            this.files.set(item.uri, new ReviewFile(baseline));
+            this.files.set(
+              item.uri,
+              new ReviewFile(
+                baseline,
+                baseline,
+                baseline == null && item.baselineRecovery !== false,
+              ),
+            );
           } catch (error) {
             this.logger.warn('Could not restore inline review snapshot', error);
             this.skip(item.uri);
@@ -304,12 +314,15 @@ export class ReviewSession implements vscode.Disposable {
     if (!this.enabled || content == null || this.disposed || this.files.has(key)) {
       return;
     }
+    // Outside initial discovery, opening a previously unseen committed file can
+    // race its filesystem event. Use the same fallback in either event order.
+    const committed = this.ready ? await this.sources.committedBaseline(uri) : undefined;
     const latest = await this.read(uri);
     if (!this.enabled || this.disposed || this.files.has(key)) {
       return;
     }
     if (latest != null) {
-      const file = new ReviewFile(latest);
+      const file = new ReviewFile(committed ?? latest, latest);
       this.files.set(key, file);
       await file.saveBaseline(this.snapshots);
       if (this.ignored.delete(key)) {
@@ -341,6 +354,28 @@ export class ReviewSession implements vscode.Disposable {
     if (content === undefined) {
       this.skip(key);
       return undefined;
+    }
+    const existing = this.files.get(key);
+    if (content != null && (existing == null || existing.needsBaselineRecovery)) {
+      const baseline = await this.sources.committedBaseline(uri);
+      // A watcher, editor edit, or explicit review decision can supersede this read.
+      if (
+        !this.enabled ||
+        this.disposed ||
+        sequence !== this.reads.get(key) ||
+        this.files.get(key) !== existing
+      ) {
+        return this.files.get(key);
+      }
+      if (existing != null) {
+        existing.recoverBaseline(baseline);
+        this.notify();
+      } else if (this.tracking) {
+        const file = new ReviewFile(null, content);
+        file.recoverBaseline(baseline);
+        this.files.set(key, file);
+        this.notify();
+      }
     }
     return this.observe(uri, content) ? this.files.get(key) : undefined;
   }
@@ -513,7 +548,7 @@ export class ReviewSession implements vscode.Disposable {
         for (const [uri, file] of files) {
           // eslint-disable-next-line no-await-in-loop
           const baseline = await file.saveBaseline(this.snapshots);
-          saved.files.push({uri, baseline});
+          saved.files.push({uri, baseline, baselineRecovery: file.needsBaselineRecovery});
         }
         await this.context.workspaceState.update(STORAGE_KEY, saved);
       })
