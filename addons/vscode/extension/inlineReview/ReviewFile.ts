@@ -36,7 +36,11 @@ export class ReviewFile {
   private readonly acceptedUndo: Array<string | null | Snapshot> = [];
   private readonly acceptedRedo: Array<string | null | Snapshot> = [];
 
-  constructor(baseline: string | null | Snapshot, current: string | null | Snapshot = baseline) {
+  constructor(
+    baseline: string | null | Snapshot,
+    current: string | null | Snapshot = baseline,
+    public needsBaselineRecovery = baseline == null,
+  ) {
     this.before = baseline;
     this.after = current;
   }
@@ -46,6 +50,7 @@ export class ReviewFile {
   }
 
   set baseline(text: string | null) {
+    this.needsBaselineRecovery = false;
     // A manual edit rebases the review. Old decisions must not restore that old baseline.
     this.acceptedUndo.length = 0;
     this.acceptedRedo.length = 0;
@@ -77,10 +82,23 @@ export class ReviewFile {
   }
 
   private recordAccept(baseline: string | null | Snapshot): void {
+    this.needsBaselineRecovery = false;
     this.acceptedUndo.push(this.before);
     this.acceptedRedo.length = 0;
     this.before = baseline;
     this.invalidate();
+  }
+
+  /** Resolve a missing initial snapshot once, without replacing review decisions. */
+  recoverBaseline(content: string | undefined): void {
+    if (!this.needsBaselineRecovery) {
+      return;
+    }
+    this.needsBaselineRecovery = false;
+    if (content !== undefined) {
+      this.before = content;
+      this.invalidate();
+    }
   }
 
   get current(): string | null {
