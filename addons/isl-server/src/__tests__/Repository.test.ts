@@ -367,6 +367,30 @@ describe('Repository', () => {
       );
     });
 
+    it('passes the pull request submit config through to sl', async () => {
+      await runOperation({
+        args: [
+          {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
+          'pr',
+          'submit',
+          '--stack',
+        ],
+      });
+
+      expect(ejecaSpy).toHaveBeenCalledWith(
+        'sl',
+        [
+          '--config',
+          'github.submit-to-upstream=false',
+          'pr',
+          'submit',
+          '--stack',
+          '--noninteractive',
+        ],
+        expect.anything(),
+      );
+    });
+
     it('disallows some commands', async () => {
       await runOperation({
         args: ['debugsh'],
