@@ -27,10 +27,9 @@ describe('PrSubmitOperation', () => {
     });
 
     expect(operation.getArgs()).toEqual([
+      {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
       'pr',
       'submit',
-      '--config',
-      'github.submit-to-upstream=false',
       '--draft',
       '--rev',
       succeedableRevset('abc123'),
@@ -45,10 +44,9 @@ describe('PrSubmitOperation', () => {
     const operation = provider.submitOperation([], {draft: true});
 
     expect(operation.getArgs()).toEqual([
+      {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
       'pr',
       'submit',
-      '--config',
-      'github.submit-to-upstream=false',
       '--draft',
       '--rev',
       exactRevset('.'),
@@ -63,10 +61,9 @@ describe('PrSubmitOperation', () => {
     });
 
     expect(operation.getArgs()).toEqual([
+      {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
       'pr',
       'submit',
-      '--config',
-      'github.submit-to-upstream=false',
       '--stack',
       '--reviewer',
       'alice',
@@ -81,10 +78,9 @@ describe('PrSubmitOperation', () => {
     });
 
     expect(operation.getArgs()).toEqual([
+      {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
       'pr',
       'submit',
-      '--config',
-      'github.submit-to-upstream=false',
       '--draft',
       '--rev',
       succeedableRevset('abc123'),

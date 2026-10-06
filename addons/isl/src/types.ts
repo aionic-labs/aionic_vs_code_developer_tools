@@ -1061,6 +1061,7 @@ export const settableConfigNames = [
   'isl.generated-files-regex',
   'isl.copy-commit-hash-format',
   'github.preferred_submit_command',
+  'github.submit-to-upstream',
   'ui.allowemptycommit',
   'ui.merge',
   'amend.autorestack',
