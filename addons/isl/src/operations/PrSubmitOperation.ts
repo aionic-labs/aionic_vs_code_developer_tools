@@ -25,7 +25,13 @@ export class PrSubmitOperation extends Operation {
   }
 
   getArgs() {
-    const args: Array<CommandArg> = ['pr', 'submit', '--config', 'github.submit-to-upstream=false'];
+    const args: Array<CommandArg> = [
+      // Structured config args are the only form the ISL server accepts;
+      // a raw '--config' string is rejected before `sl` runs.
+      {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
+      'pr',
+      'submit',
+    ];
     if (this.options?.draft) {
       args.push('--draft');
     }

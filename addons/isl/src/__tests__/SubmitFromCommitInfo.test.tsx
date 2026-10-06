@@ -63,10 +63,9 @@ describe('submitting from Commit Info', () => {
         type: 'runOperation',
         operation: {
           args: [
+            {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
             'pr',
             'submit',
-            '--config',
-            'github.submit-to-upstream=false',
             '--draft',
             '--rev',
             succeedableRevset('a'),
@@ -92,10 +91,9 @@ describe('submitting from Commit Info', () => {
         type: 'runOperation',
         operation: {
           args: [
+            {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
             'pr',
             'submit',
-            '--config',
-            'github.submit-to-upstream=false',
             '--draft',
             '--stack',
           ],
@@ -115,10 +113,9 @@ describe('submitting from Commit Info', () => {
         type: 'runOperation',
         operation: expect.objectContaining({
           args: [
+            {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
             'pr',
             'submit',
-            '--config',
-            'github.submit-to-upstream=false',
             '--draft',
             '--rev',
             exactRevset('.'),
@@ -137,7 +134,12 @@ describe('submitting from Commit Info', () => {
       expectMessageSentToServer({
         type: 'runOperation',
         operation: expect.objectContaining({
-          args: ['pr', 'submit', '--config', 'github.submit-to-upstream=false', '--stack'],
+          args: [
+            {type: 'config', key: 'github.submit-to-upstream', value: 'false'},
+            'pr',
+            'submit',
+            '--stack',
+          ],
         }),
       }),
     );
