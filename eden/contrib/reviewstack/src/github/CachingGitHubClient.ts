@@ -102,6 +102,8 @@ type NormalizedStackPullRequestFragment = {
   viewerCanUpdate: boolean;
   reviewDecision: PullRequestReviewDecision | null | undefined;
   latestReviewStates: PullRequestReviewState[];
+  opinionatedReviews: Array<{state: PullRequestReviewState; author: UserFragment | null}>;
+  requestedReviewers: UserFragment[];
   headRefOid: GitObjectID;
   numComments: number;
   cachedAt: number;
@@ -654,6 +656,8 @@ export default class CachingGitHubClient implements GitHubClient {
               viewerCanUpdate,
               reviewDecision,
               latestReviewStates,
+              opinionatedReviews,
+              requestedReviewers,
               headRefOid,
               numComments,
               cachedAt,
@@ -669,6 +673,8 @@ export default class CachingGitHubClient implements GitHubClient {
               typeof mergeStateStatus !== 'string' ||
               typeof viewerCanUpdate !== 'boolean' ||
               !Array.isArray(latestReviewStates) ||
+              !Array.isArray(opinionatedReviews) ||
+              !Array.isArray(requestedReviewers) ||
               !isFreshStackPullRequestCacheEntry(cachedAt)
             ) {
               resolve(null);
@@ -688,6 +694,10 @@ export default class CachingGitHubClient implements GitHubClient {
               viewerCanUpdate,
               reviewDecision,
               latestReviews: {nodes: latestReviewStates.map(state => ({state}))},
+              latestOpinionatedReviews: {nodes: opinionatedReviews},
+              reviewRequests: {
+                nodes: requestedReviewers.map(requestedReviewer => ({requestedReviewer})),
+              },
               headRefOid,
               totalCommentsCount: numComments,
               comments: {totalCount: numComments},
@@ -856,6 +866,8 @@ function normalizePullRequestFragment(
     viewerCanUpdate,
     reviewDecision,
     latestReviews,
+    latestOpinionatedReviews,
+    reviewRequests,
     headRefOid,
   } = fragment;
   return {
@@ -872,9 +884,16 @@ function normalizePullRequestFragment(
     mergeStateStatus,
     viewerCanUpdate,
     reviewDecision,
-    latestReviewStates: (latestReviews?.nodes ?? [])
-      .map(review => review?.state)
-      .filter(notEmpty),
+    latestReviewStates: (latestReviews?.nodes ?? []).map(review => review?.state).filter(notEmpty),
+    opinionatedReviews: (latestOpinionatedReviews?.nodes ?? [])
+      .filter(notEmpty)
+      .map(({state, author}) => ({
+        state,
+        author: author?.__typename === 'User' ? author : null,
+      })),
+    requestedReviewers: (reviewRequests?.nodes ?? [])
+      .map(node => node?.requestedReviewer)
+      .filter((reviewer): reviewer is UserFragment => reviewer?.__typename === 'User'),
     headRefOid,
     numComments: countPullRequestComments(fragment),
     cachedAt: Date.now(),

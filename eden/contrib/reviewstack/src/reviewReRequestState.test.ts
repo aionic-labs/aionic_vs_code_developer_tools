@@ -5,10 +5,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import {PullRequestReviewState} from './generated/graphql';
-import reviewReRequestState from './reviewReRequestState';
+import type {UserFragment} from './generated/graphql';
 
-function user(login: string) {
+import {PullRequestReviewState} from './generated/graphql';
+import reviewReRequestState, {isReReviewRequested} from './reviewReRequestState';
+
+function user(login: string): UserFragment {
   return {__typename: 'User', id: `id-${login}`, login, avatarUrl: `https://avatars/${login}`};
 }
 
@@ -82,5 +84,15 @@ describe('reviewReRequestState', () => {
 
   it('returns nothing when nobody requested changes', () => {
     expect(reviewReRequestState([], [], [])).toEqual({toReRequest: [], awaitingReReview: []});
+  });
+});
+
+describe('isReReviewRequested', () => {
+  it('is true only once everyone who requested changes was asked again', () => {
+    expect(isReReviewRequested({toReRequest: [], awaitingReReview: [user('alice')]})).toBe(true);
+    expect(
+      isReReviewRequested({toReRequest: [user('bob')], awaitingReReview: [user('alice')]}),
+    ).toBe(false);
+    expect(isReReviewRequested({toReRequest: [], awaitingReReview: []})).toBe(false);
   });
 });

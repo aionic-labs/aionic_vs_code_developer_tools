@@ -38,10 +38,21 @@ type ReviewRequest =
 
 export type ReviewReRequestState = {
   /** Reviewers who requested changes and have not been asked to review again. */
-  toReRequest: Array<UserFragment>;
+  toReRequest: ReadonlyArray<UserFragment>;
   /** Reviewers who requested changes and now have a pending review request. */
-  awaitingReReview: Array<UserFragment>;
+  awaitingReReview: ReadonlyArray<UserFragment>;
 };
+
+/**
+ * Only once everyone who requested changes has been asked again does the
+ * pull request read as waiting for a re-review rather than blocked.
+ */
+export function isReReviewRequested({
+  toReRequest,
+  awaitingReReview,
+}: ReviewReRequestState): boolean {
+  return awaitingReReview.length > 0 && toReRequest.length === 0;
+}
 
 function isUser(author: ReviewAuthor | null | undefined): author is UserFragment {
   return (
