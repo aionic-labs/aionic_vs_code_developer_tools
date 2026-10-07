@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import type {PullRequestReviewDecision, PullRequestState} from './generated/graphql';
+import type {PullRequestReviewDecision, PullRequestState, UserFragment} from './generated/graphql';
 
 import PullRequestStateLabel from './PullRequestStateLabel';
 import {PullRequestState as PullRequestStateValue} from './generated/graphql';
@@ -19,12 +19,15 @@ import {useCallback, useState} from 'react';
 export default function PullRequestDraftStateMenu({
   id,
   isDraft,
+  reRequestReviewers,
   reviewDecision,
   state,
   viewerCanUpdate,
 }: {
   id: string;
   isDraft: boolean;
+  /** Reviewers to ask again, see reviewersToReRequest(). */
+  reRequestReviewers: ReadonlyArray<UserFragment>;
   reviewDecision: PullRequestReviewDecision | null;
   state: PullRequestState;
   viewerCanUpdate: boolean;
@@ -59,6 +62,36 @@ export default function PullRequestDraftStateMenu({
     },
     [client, id, isDraft, refreshPullRequest, setNotification],
   );
+
+  const reRequestLogins = reRequestReviewers.map(({login}) => login).join(', ');
+  const reRequestReview = useCallback(async () => {
+    if (client == null || reRequestReviewers.length === 0) {
+      return;
+    }
+    setUpdating(true);
+    try {
+      // `union` adds to the pending requests instead of replacing them, so
+      // reviewers who are still waiting to review are left untouched.
+      await client.requestReviews({
+        pullRequestId: id,
+        userIds: reRequestReviewers.map(({id}) => id),
+        union: true,
+      });
+      setNotification({
+        type: 'info',
+        message: `Re-requested review from ${reRequestLogins}`,
+      });
+      refreshPullRequest();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotification({
+        type: 'error',
+        message: `Failed to re-request review: ${message}`,
+      });
+    } finally {
+      setUpdating(false);
+    }
+  }, [client, id, reRequestLogins, reRequestReviewers, refreshPullRequest, setNotification]);
 
   if (state !== PullRequestStateValue.Open || !viewerCanUpdate) {
     return (
@@ -96,6 +129,19 @@ export default function PullRequestDraftStateMenu({
             onSelect={() => updateDraftState(false)}>
             Mark ready for review
           </ActionList.Item>
+          <ActionList.Divider />
+          <ActionList.Group selectionVariant={false}>
+            <ActionList.Item
+              disabled={updating || reRequestReviewers.length === 0}
+              onSelect={reRequestReview}>
+              Re-request review
+              <ActionList.Description variant="block">
+                {reRequestReviewers.length === 0
+                  ? 'No reviewer has requested changes'
+                  : `from ${reRequestLogins}`}
+              </ActionList.Description>
+            </ActionList.Item>
+          </ActionList.Group>
         </ActionList>
       </ActionMenu.Overlay>
     </ActionMenu>
