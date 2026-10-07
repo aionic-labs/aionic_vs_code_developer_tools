@@ -17,6 +17,21 @@ fragment StackPullRequestFragment on PullRequest {
       state
     }
   }
+  latestOpinionatedReviews(first: 100) {
+    nodes {
+      state
+      author {
+        ...UserFragment
+      }
+    }
+  }
+  reviewRequests(first: 100) {
+    nodes {
+      requestedReviewer {
+        ...UserFragment
+      }
+    }
+  }
   headRefOid
   totalCommentsCount
   comments {

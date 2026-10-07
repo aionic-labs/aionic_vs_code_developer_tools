@@ -12,6 +12,7 @@ import BulletItems from './BulletItems';
 import CommentCount from './CommentCount';
 import PullRequestStateLabel from './PullRequestStateLabel';
 import effectivePullRequestReviewDecision from './effectivePullRequestReviewDecision';
+import reviewReRequestState, {isReReviewRequested} from './reviewReRequestState';
 import useNavigateToPullRequest from './useNavigateToPullRequest';
 import {formatISODate} from './utils';
 import {ActionList, Box, Text} from '@primer/react';
@@ -112,18 +113,25 @@ export default React.memo(function PullRequestStackItem({
   graphPosition,
   isSelected,
   isDraft,
+  latestOpinionatedReviews,
   latestReviews,
   number,
   reviewDecision,
+  reviewRequests,
   state,
   title,
   totalCommentsCount,
   updatedAt,
 }: Props): React.ReactElement {
   const navigateToPullRequest = useNavigateToPullRequest();
-  const effectiveReviewDecision = effectivePullRequestReviewDecision(
-    reviewDecision,
-    latestReviews?.nodes ?? [],
+  const latestReviewNodes = latestReviews?.nodes ?? [];
+  const opinionatedReviews = latestOpinionatedReviews?.nodes ?? [];
+  const effectiveReviewDecision = effectivePullRequestReviewDecision(reviewDecision, [
+    ...latestReviewNodes,
+    ...opinionatedReviews,
+  ]);
+  const reReviewRequested = isReReviewRequested(
+    reviewReRequestState(opinionatedReviews, latestReviewNodes, reviewRequests?.nodes ?? []),
   );
 
   return (
@@ -143,6 +151,7 @@ export default React.memo(function PullRequestStackItem({
           <BulletItems>
             <PullRequestStateLabel
               isDraft={isDraft}
+              reReviewRequested={reReviewRequested}
               reviewDecision={effectiveReviewDecision}
               state={state}
               variant="small"
