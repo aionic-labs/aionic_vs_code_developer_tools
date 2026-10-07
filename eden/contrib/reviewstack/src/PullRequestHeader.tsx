@@ -12,7 +12,7 @@ import PullRequestVersions from './PullRequestVersions';
 import TrustedRenderedMarkdown from './TrustedRenderedMarkdown';
 import effectivePullRequestReviewDecision from './effectivePullRequestReviewDecision';
 import {gitHubPullRequestAtom} from './jotai';
-import reviewersToReRequest from './reviewersToReRequest';
+import reviewReRequestState from './reviewReRequestState';
 import {Box, Link, Text} from '@primer/react';
 import {useAtomValue} from 'jotai';
 import {Suspense} from 'react';
@@ -29,12 +29,15 @@ export default function PullRequestHeader({height}: Props): React.ReactElement |
   }
 
   const {id, isDraft, number, reviewDecision, state, titleHTML, url, viewerCanUpdate} = pullRequest;
-  const effectiveReviewDecision = effectivePullRequestReviewDecision(
-    reviewDecision,
-    pullRequest.latestReviews?.nodes ?? [],
-  );
-  const reRequestReviewers = reviewersToReRequest(
-    pullRequest.latestReviews?.nodes ?? [],
+  const latestReviews = pullRequest.latestReviews?.nodes ?? [];
+  const latestOpinionatedReviews = pullRequest.latestOpinionatedReviews?.nodes ?? [];
+  const effectiveReviewDecision = effectivePullRequestReviewDecision(reviewDecision, [
+    ...latestReviews,
+    ...latestOpinionatedReviews,
+  ]);
+  const {toReRequest, awaitingReReview} = reviewReRequestState(
+    latestOpinionatedReviews,
+    latestReviews,
     pullRequest.reviewRequests?.nodes ?? [],
   );
 
@@ -59,8 +62,9 @@ export default function PullRequestHeader({height}: Props): React.ReactElement |
       <Box display="flex" gridGap={2}>
         <PullRequestDraftStateMenu
           id={id}
+          awaitingReReview={awaitingReReview}
           isDraft={isDraft}
-          reRequestReviewers={reRequestReviewers}
+          reRequestReviewers={toReRequest}
           reviewDecision={effectiveReviewDecision}
           state={state}
           viewerCanUpdate={viewerCanUpdate}
