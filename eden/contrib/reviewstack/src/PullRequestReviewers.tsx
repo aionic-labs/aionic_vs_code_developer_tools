@@ -9,6 +9,7 @@ import type {PullRequestReviewState, UserFragment} from './generated/graphql';
 
 import FieldLabel from './FieldLabel';
 import RepoAssignableUsersInput from './RepoAssignableUsersInput';
+import {PullRequestReviewState as ReviewState} from './generated/graphql';
 import {
   gitHubClientAtom,
   gitHubPullRequestAtom,
@@ -85,6 +86,15 @@ export default function PullRequestReviewers(): React.ReactElement {
     for (const review of pullRequest?.latestReviews?.nodes ?? []) {
       if (review?.author?.__typename === 'User') {
         states.set(review.author.id, review.state);
+      }
+    }
+    // A reviewer listed in reviewRequests has not reviewed the current state
+    // yet: either they never did, or their review was re-requested after they
+    // submitted one. Show them as pending rather than their stale review.
+    for (const node of pullRequest?.reviewRequests?.nodes ?? []) {
+      const reviewer = node?.requestedReviewer;
+      if (reviewer?.__typename === 'User') {
+        states.set(reviewer.id, ReviewState.Pending);
       }
     }
     return states;
