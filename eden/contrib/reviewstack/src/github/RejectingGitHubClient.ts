@@ -22,6 +22,8 @@ import type {
   AddPullRequestReviewThreadMutationData,
   AddReactionInput,
   AddReactionMutationData,
+  ClosePullRequestInput,
+  ClosePullRequestMutationData,
   ConvertPullRequestToDraftInput,
   ConvertPullRequestToDraftMutationData,
   DeleteIssueCommentInput,
@@ -37,6 +39,8 @@ import type {
   RemoveLabelsFromLabelableMutationData,
   RemoveReactionInput,
   RemoveReactionMutationData,
+  ReopenPullRequestInput,
+  ReopenPullRequestMutationData,
   RequestReviewsInput,
   RequestReviewsMutationData,
   ResolveReviewThreadInput,
@@ -106,6 +110,14 @@ export default class RejectingGitHubClient implements GitHubClient {
   }
 
   getFreshStackPullRequests(_prs: number[]): Promise<StackPullRequestFragment[]> {
+    return Promise.reject('Method not implemented.');
+  }
+
+  closePullRequest(_input: ClosePullRequestInput): Promise<ClosePullRequestMutationData> {
+    return Promise.reject('Method not implemented.');
+  }
+
+  reopenPullRequest(_input: ReopenPullRequestInput): Promise<ReopenPullRequestMutationData> {
     return Promise.reject('Method not implemented.');
   }
 
