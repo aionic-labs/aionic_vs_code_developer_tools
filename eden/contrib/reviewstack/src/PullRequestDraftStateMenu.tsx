@@ -11,6 +11,7 @@ import PullRequestStateLabel from './PullRequestStateLabel';
 import {PullRequestState as PullRequestStateValue} from './generated/graphql';
 import {gitHubClientAtom, notificationMessageAtom} from './jotai';
 import pullRequestStatusAndLabel from './pullRequestStatusAndLabel';
+import {isReReviewRequested} from './reviewReRequestState';
 import useRefreshPullRequest from './useRefreshPullRequest';
 import {ActionList, ActionMenu, Button, StateLabel} from '@primer/react';
 import {useAtomValue, useSetAtom} from 'jotai';
@@ -68,9 +69,10 @@ export default function PullRequestDraftStateMenu({
 
   const reRequestLogins = reRequestReviewers.map(({login}) => login).join(', ');
   const awaitingLogins = awaitingReReview.map(({login}) => login).join(', ');
-  // Only once everyone who requested changes has been asked again does the
-  // pull request read as waiting for a re-review rather than blocked.
-  const reReviewRequested = awaitingReReview.length > 0 && reRequestReviewers.length === 0;
+  const reReviewRequested = isReReviewRequested({
+    toReRequest: reRequestReviewers,
+    awaitingReReview,
+  });
   const reRequestReview = useCallback(async () => {
     if (client == null || reRequestReviewers.length === 0) {
       return;
