@@ -1,6 +1,7 @@
 /* Run with VS Code --extensionTestsPath in an isolated, empty test workspace. */
 /* eslint-disable no-console */
 const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const vscode = require('vscode');
@@ -146,5 +147,43 @@ exports.run = async function () {
   assert.equal(vscode.window.activeTextEditor.document.getText(), acceptedFileText);
   assert.equal(await fs.readFile(second.fsPath, 'utf8'), acceptedFileText);
   console.log('PASS whole-file acceptance undo/redo from the editable file preserves contents');
+  // Introduce an already-committed file after tracking starts, reproducing a
+  // missing snapshot without changing the user's real repository or review state.
+  const importedRepo = await fs.mkdtemp(path.join(path.dirname(folder), 'committed-'));
+  execFileSync('git', ['init', importedRepo]);
+  await fs.writeFile(path.join(importedRepo, 'existing.ts'), before);
+  execFileSync('git', ['-C', importedRepo, 'add', '.']);
+  execFileSync('git', [
+    '-C',
+    importedRepo,
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.com',
+    'commit',
+    '-m',
+    'baseline',
+  ]);
+  await fs.writeFile(
+    path.join(importedRepo, 'existing.ts'),
+    'const one = 10;\n// unchanged\nconst two = 20;\n',
+  );
+  await fs.rename(importedRepo, path.join(folder, 'imported'));
+  const recovered = vscode.Uri.file(path.join(folder, 'imported', 'existing.ts'));
+  await vscode.window.showTextDocument(recovered);
+  changes = await lenses(recovered, 2);
+  assert.equal(changes[0].range.start.line, 0);
+  assert.equal(changes[1].range.start.line, 2);
+  await invoke('accept', changes[0].command.arguments[0]);
+  changes = await lenses(recovered, 1);
+  await invoke('reject', changes[0].command.arguments[0]);
+  await lenses(recovered, 0);
+  assert.equal(
+    vscode.window.activeTextEditor.document.getText(),
+    'const one = 10;\n// unchanged\nconst two = 2;\n',
+  );
+  console.log(
+    'PASS missing committed baseline recovers two controls and independent accept/reject',
+  );
   console.log('AIONIC_INLINE_REVIEW_SMOKE_PASSED');
 };

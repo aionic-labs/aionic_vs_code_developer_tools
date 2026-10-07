@@ -18,13 +18,9 @@ import {
   gitHubUsernameAtom,
   notificationMessageAtom,
 } from './jotai';
+import {RE_REVIEW_REQUESTED_COLOR} from './pullRequestStatusAndLabel';
 import useRefreshPullRequest from './useRefreshPullRequest';
-import {
-  CheckCircleFillIcon,
-  ClockIcon,
-  FileDiffIcon,
-  GearIcon,
-} from '@primer/octicons-react';
+import {CheckCircleFillIcon, ClockIcon, FileDiffIcon, GearIcon} from '@primer/octicons-react';
 import {ActionMenu, AvatarToken, Box, Button, StyledOcticon, Tooltip} from '@primer/react';
 import {useAtom, useAtomValue, useSetAtom} from 'jotai';
 import {loadable} from 'jotai/utils';
@@ -82,7 +78,7 @@ export default function PullRequestReviewers(): React.ReactElement {
   }, [pullRequest, setPullRequestReviewers, username]);
 
   const reviewStates = useMemo(() => {
-    const states = new Map<string, PullRequestReviewState>();
+    const states = new Map<string, ReviewerState>();
     for (const review of pullRequest?.latestReviews?.nodes ?? []) {
       if (review?.author?.__typename === 'User') {
         states.set(review.author.id, review.state);
@@ -91,10 +87,24 @@ export default function PullRequestReviewers(): React.ReactElement {
     // A reviewer listed in reviewRequests has not reviewed the current state
     // yet: either they never did, or their review was re-requested after they
     // submitted one. Show them as pending rather than their stale review.
+    const requestedIDs = new Set<string>();
     for (const node of pullRequest?.reviewRequests?.nodes ?? []) {
       const reviewer = node?.requestedReviewer;
       if (reviewer?.__typename === 'User') {
+        requestedIDs.add(reviewer.id);
         states.set(reviewer.id, ReviewState.Pending);
+      }
+    }
+    // GitHub keeps a re-requested reviewer's "changes requested" verdict only
+    // in the opinionated list; mark them as waiting to review again.
+    for (const review of pullRequest?.latestOpinionatedReviews?.nodes ?? []) {
+      const author = review?.author;
+      if (
+        review?.state === ReviewState.ChangesRequested &&
+        author?.__typename === 'User' &&
+        requestedIDs.has(author.id)
+      ) {
+        states.set(author.id, 'RE_REQUESTED');
       }
     }
     return states;
@@ -143,7 +153,14 @@ export default function PullRequestReviewers(): React.ReactElement {
         });
       }
     },
-    [client, pullRequest, pullRequestReviewers, refreshPullRequest, setPullRequestReviewers, setNotification],
+    [
+      client,
+      pullRequest,
+      pullRequestReviewers,
+      refreshPullRequest,
+      setPullRequestReviewers,
+      setNotification,
+    ],
   );
 
   const label = !viewerCanUpdate ? (
@@ -187,8 +204,16 @@ export default function PullRequestReviewers(): React.ReactElement {
   );
 }
 
-function ReviewerStatus({state}: {state: PullRequestReviewState | undefined}): React.ReactElement {
+type ReviewerState = PullRequestReviewState | 'RE_REQUESTED';
+
+function ReviewerStatus({state}: {state: ReviewerState | undefined}): React.ReactElement {
   switch (state) {
+    case 'RE_REQUESTED':
+      return (
+        <Tooltip aria-label="Review re-requested">
+          <StyledOcticon icon={ClockIcon} color={RE_REVIEW_REQUESTED_COLOR} />
+        </Tooltip>
+      );
     case 'APPROVED':
       return (
         <Tooltip aria-label="Approved">

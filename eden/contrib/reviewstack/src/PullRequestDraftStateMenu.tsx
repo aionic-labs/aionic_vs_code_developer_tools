@@ -17,6 +17,7 @@ import {useAtomValue, useSetAtom} from 'jotai';
 import {useCallback, useState} from 'react';
 
 export default function PullRequestDraftStateMenu({
+  awaitingReReview,
   id,
   isDraft,
   reRequestReviewers,
@@ -24,9 +25,11 @@ export default function PullRequestDraftStateMenu({
   state,
   viewerCanUpdate,
 }: {
+  /** Reviewers who requested changes and were already asked again, see reviewReRequestState(). */
+  awaitingReReview: ReadonlyArray<UserFragment>;
   id: string;
   isDraft: boolean;
-  /** Reviewers to ask again, see reviewersToReRequest(). */
+  /** Reviewers who requested changes and can be asked again, see reviewReRequestState(). */
   reRequestReviewers: ReadonlyArray<UserFragment>;
   reviewDecision: PullRequestReviewDecision | null;
   state: PullRequestState;
@@ -64,6 +67,10 @@ export default function PullRequestDraftStateMenu({
   );
 
   const reRequestLogins = reRequestReviewers.map(({login}) => login).join(', ');
+  const awaitingLogins = awaitingReReview.map(({login}) => login).join(', ');
+  // Only once everyone who requested changes has been asked again does the
+  // pull request read as waiting for a re-review rather than blocked.
+  const reReviewRequested = awaitingReReview.length > 0 && reRequestReviewers.length === 0;
   const reRequestReview = useCallback(async () => {
     if (client == null || reRequestReviewers.length === 0) {
       return;
@@ -95,11 +102,18 @@ export default function PullRequestDraftStateMenu({
 
   if (state !== PullRequestStateValue.Open || !viewerCanUpdate) {
     return (
-      <PullRequestStateLabel isDraft={isDraft} reviewDecision={reviewDecision} state={state} />
+      <PullRequestStateLabel
+        isDraft={isDraft}
+        reReviewRequested={reReviewRequested}
+        reviewDecision={reviewDecision}
+        state={state}
+      />
     );
   }
 
-  const {label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft);
+  const {label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft, {
+    reReviewRequested,
+  });
   return (
     <ActionMenu>
       <ActionMenu.Anchor>
@@ -136,9 +150,11 @@ export default function PullRequestDraftStateMenu({
               onSelect={reRequestReview}>
               Re-request review
               <ActionList.Description variant="block">
-                {reRequestReviewers.length === 0
-                  ? 'No reviewer has requested changes'
-                  : `from ${reRequestLogins}`}
+                {reRequestReviewers.length > 0
+                  ? `from ${reRequestLogins}`
+                  : awaitingReReview.length > 0
+                  ? `Waiting for ${awaitingLogins} to review again`
+                  : 'No reviewer has requested changes'}
               </ActionList.Description>
             </ActionList.Item>
           </ActionList.Group>

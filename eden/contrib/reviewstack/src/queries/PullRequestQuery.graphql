@@ -63,6 +63,16 @@ query PullRequestQuery(
           }
         }
       }
+      # Keeps a reviewer's "changes requested" verdict after their review is
+      # requested again, when GitHub drops them from latestReviews.
+      latestOpinionatedReviews(first: 100) {
+        nodes {
+          state
+          author {
+            ...UserFragment
+          }
+        }
+      }
       reviewThreads(first: 100) {
         nodes {
           ...PullRequestReviewThreadFragment

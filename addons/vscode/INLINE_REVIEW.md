@@ -80,6 +80,12 @@ edits update the baseline as well as the current contents. If you manually rewri
 a pending hunk, that hunk is acknowledged; unrelated pending hunks remain reviewable.
 Accept/Reject and Undo/Redo of a rejection preserve the review baseline.
 
+If an existing Git file was first detected without a baseline and incorrectly shown
+as entirely new, the extension recovers its committed `HEAD` contents as the baseline.
+This also repairs older saved sessions on reload. Separated edits then have separate
+review controls. Existing snapshots and acceptance decisions are kept; files absent
+from `HEAD` remain new-file reviews. No files are staged, reset, or written by recovery.
+
 VS Code does not expose reliable author information for document edits. This
 distinguishes editor changes from external disk writes, not humans from AI: edits
 applied directly by an AI extension, formatters, and other editor extensions are
@@ -105,7 +111,8 @@ this setting to be enabled.
 
 Snapshots contain source text and remain local to VS Code's workspace storage.
 The review feature performs no network calls. It uses read-only Git file-list and
-ignore checks to identify source files; it does not modify Git state.
+ignore checks to identify source files, and reads committed text when recovering a
+missing baseline; it does not modify Git state.
 Accepting a change is not staging, committing, or submitting it. Existing Sapling
 commands remain separate and retain their usual behavior.
 
