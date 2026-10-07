@@ -21,6 +21,8 @@ import type {
   AddPullRequestReviewThreadMutationData,
   AddReactionInput,
   AddReactionMutationData,
+  ClosePullRequestInput,
+  ClosePullRequestMutationData,
   ConvertPullRequestToDraftInput,
   ConvertPullRequestToDraftMutationData,
   DeleteIssueCommentInput,
@@ -36,6 +38,8 @@ import type {
   RemoveLabelsFromLabelableMutationData,
   RemoveReactionInput,
   RemoveReactionMutationData,
+  ReopenPullRequestInput,
+  ReopenPullRequestMutationData,
   RequestReviewsInput,
   RequestReviewsMutationData,
   ResolveReviewThreadInput,
@@ -78,6 +82,18 @@ export default interface GitHubClient {
   getRepoLabels(query: string | null): Promise<LabelFragment[]>;
   getStackPullRequests(prs: number[]): Promise<StackPullRequestFragment[]>;
   getFreshStackPullRequests(prs: number[]): Promise<StackPullRequestFragment[]>;
+
+  /**
+   * Closes an open pull request without merging it.
+   * https://docs.github.com/en/graphql/reference/mutations#closepullrequest
+   */
+  closePullRequest(input: ClosePullRequestInput): Promise<ClosePullRequestMutationData>;
+
+  /**
+   * Reopens a closed pull request.
+   * https://docs.github.com/en/graphql/reference/mutations#reopenpullrequest
+   */
+  reopenPullRequest(input: ReopenPullRequestInput): Promise<ReopenPullRequestMutationData>;
 
   convertPullRequestToDraft(
     input: ConvertPullRequestToDraftInput,

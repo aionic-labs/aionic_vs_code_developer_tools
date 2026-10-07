@@ -23,6 +23,8 @@ import type {
   AddPullRequestReviewThreadMutationData,
   AddReactionInput,
   AddReactionMutationData,
+  ClosePullRequestInput,
+  ClosePullRequestMutationData,
   ConvertPullRequestToDraftInput,
   ConvertPullRequestToDraftMutationData,
   DeleteIssueCommentInput,
@@ -38,6 +40,8 @@ import type {
   RemoveLabelsFromLabelableMutationData,
   RemoveReactionInput,
   RemoveReactionMutationData,
+  ReopenPullRequestInput,
+  ReopenPullRequestMutationData,
   RequestReviewsInput,
   RequestReviewsMutationData,
   ResolveReviewThreadInput,
@@ -112,6 +116,14 @@ export default class TestGitHubClient implements GitHubClient {
 
   getFreshStackPullRequests(_prs: number[]): Promise<StackPullRequestFragment[]> {
     return Promise.resolve([]);
+  }
+
+  closePullRequest(_input: ClosePullRequestInput): Promise<ClosePullRequestMutationData> {
+    return Promise.resolve({});
+  }
+
+  reopenPullRequest(_input: ReopenPullRequestInput): Promise<ReopenPullRequestMutationData> {
+    return Promise.resolve({});
   }
 
   convertPullRequestToDraft(

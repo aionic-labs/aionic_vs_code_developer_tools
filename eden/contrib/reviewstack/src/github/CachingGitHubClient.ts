@@ -22,6 +22,8 @@ import type {
   AddPullRequestReviewThreadMutationData,
   AddReactionInput,
   AddReactionMutationData,
+  ClosePullRequestInput,
+  ClosePullRequestMutationData,
   ConvertPullRequestToDraftInput,
   ConvertPullRequestToDraftMutationData,
   DeleteIssueCommentInput,
@@ -42,6 +44,8 @@ import type {
   RemoveLabelsFromLabelableMutationData,
   RemoveReactionInput,
   RemoveReactionMutationData,
+  ReopenPullRequestInput,
+  ReopenPullRequestMutationData,
   RequestReviewsInput,
   RequestReviewsMutationData,
   ResolveReviewThreadInput,
@@ -430,6 +434,14 @@ export default class CachingGitHubClient implements GitHubClient {
   /** Bypass display caching before a destructive stack operation. */
   getFreshStackPullRequests(prs: number[]): Promise<StackPullRequestFragment[]> {
     return this.client.getFreshStackPullRequests(prs);
+  }
+
+  closePullRequest(input: ClosePullRequestInput): Promise<ClosePullRequestMutationData> {
+    return this.client.closePullRequest(input);
+  }
+
+  reopenPullRequest(input: ReopenPullRequestInput): Promise<ReopenPullRequestMutationData> {
+    return this.client.reopenPullRequest(input);
   }
 
   convertPullRequestToDraft(

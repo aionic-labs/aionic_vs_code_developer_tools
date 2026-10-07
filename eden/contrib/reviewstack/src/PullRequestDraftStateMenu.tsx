@@ -21,6 +21,7 @@ export default function PullRequestDraftStateMenu({
   awaitingReReview,
   id,
   isDraft,
+  number,
   reRequestReviewers,
   reviewDecision,
   state,
@@ -30,6 +31,7 @@ export default function PullRequestDraftStateMenu({
   awaitingReReview: ReadonlyArray<UserFragment>;
   id: string;
   isDraft: boolean;
+  number: number;
   /** Reviewers who requested changes and can be asked again, see reviewReRequestState(). */
   reRequestReviewers: ReadonlyArray<UserFragment>;
   reviewDecision: PullRequestReviewDecision | null;
@@ -102,7 +104,44 @@ export default function PullRequestDraftStateMenu({
     }
   }, [client, id, reRequestLogins, reRequestReviewers, refreshPullRequest, setNotification]);
 
-  if (state !== PullRequestStateValue.Open || !viewerCanUpdate) {
+  const updateOpenState = useCallback(
+    async (action: 'close' | 'reopen') => {
+      if (client == null) {
+        return;
+      }
+      if (
+        action === 'close' &&
+        !window.confirm(`Close pull request #${number} without merging it?`)
+      ) {
+        return;
+      }
+      setUpdating(true);
+      try {
+        if (action === 'close') {
+          await client.closePullRequest({pullRequestId: id});
+        } else {
+          await client.reopenPullRequest({pullRequestId: id});
+        }
+        setNotification({
+          type: 'info',
+          message: `${action === 'close' ? 'Closed' : 'Reopened'} pull request #${number}`,
+        });
+        refreshPullRequest();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setNotification({
+          type: 'error',
+          message: `Failed to ${action} pull request: ${message}`,
+        });
+      } finally {
+        setUpdating(false);
+      }
+    },
+    [client, id, number, refreshPullRequest, setNotification],
+  );
+
+  // Merged pull requests cannot change state; closed ones can only be reopened.
+  if (!viewerCanUpdate || state === PullRequestStateValue.Merged) {
     return (
       <PullRequestStateLabel
         isDraft={isDraft}
@@ -113,9 +152,10 @@ export default function PullRequestDraftStateMenu({
     );
   }
 
-  const {label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft, {
+  const {status, label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft, {
     reReviewRequested,
   });
+  const isOpen = state === PullRequestStateValue.Open;
   return (
     <ActionMenu>
       <ActionMenu.Anchor>
@@ -125,42 +165,59 @@ export default function PullRequestDraftStateMenu({
           variant="invisible"
           sx={{height: 'auto', padding: 0}}>
           <StateLabel
-            status="pullOpened"
+            status={status}
             sx={{backgroundColor: color, cursor: updating ? 'wait' : 'pointer'}}>
             {label}
           </StateLabel>
         </Button>
       </ActionMenu.Anchor>
       <ActionMenu.Overlay width="small">
-        <ActionList selectionVariant="single">
-          <ActionList.Item
-            selected={isDraft}
-            disabled={updating || isDraft}
-            onSelect={() => updateDraftState(true)}>
-            Convert to draft
-          </ActionList.Item>
-          <ActionList.Item
-            selected={!isDraft}
-            disabled={updating || !isDraft}
-            onSelect={() => updateDraftState(false)}>
-            Mark ready for review
-          </ActionList.Item>
-          <ActionList.Divider />
-          <ActionList.Group selectionVariant={false}>
-            <ActionList.Item
-              disabled={updating || reRequestReviewers.length === 0}
-              onSelect={reRequestReview}>
-              Re-request review
-              <ActionList.Description variant="block">
-                {reRequestReviewers.length > 0
-                  ? `from ${reRequestLogins}`
-                  : awaitingReReview.length > 0
-                  ? `Waiting for ${awaitingLogins} to review again`
-                  : 'No reviewer has requested changes'}
-              </ActionList.Description>
+        {!isOpen ? (
+          <ActionList>
+            <ActionList.Item disabled={updating} onSelect={() => updateOpenState('reopen')}>
+              Reopen pull request
             </ActionList.Item>
-          </ActionList.Group>
-        </ActionList>
+          </ActionList>
+        ) : (
+          <ActionList selectionVariant="single">
+            <ActionList.Item
+              selected={isDraft}
+              disabled={updating || isDraft}
+              onSelect={() => updateDraftState(true)}>
+              Convert to draft
+            </ActionList.Item>
+            <ActionList.Item
+              selected={!isDraft}
+              disabled={updating || !isDraft}
+              onSelect={() => updateDraftState(false)}>
+              Mark ready for review
+            </ActionList.Item>
+            <ActionList.Divider />
+            <ActionList.Group selectionVariant={false}>
+              <ActionList.Item
+                disabled={updating || reRequestReviewers.length === 0}
+                onSelect={reRequestReview}>
+                Re-request review
+                <ActionList.Description variant="block">
+                  {reRequestReviewers.length > 0
+                    ? `from ${reRequestLogins}`
+                    : awaitingReReview.length > 0
+                    ? `Waiting for ${awaitingLogins} to review again`
+                    : 'No reviewer has requested changes'}
+                </ActionList.Description>
+              </ActionList.Item>
+            </ActionList.Group>
+            <ActionList.Divider />
+            <ActionList.Group selectionVariant={false}>
+              <ActionList.Item
+                variant="danger"
+                disabled={updating}
+                onSelect={() => updateOpenState('close')}>
+                Close pull request
+              </ActionList.Item>
+            </ActionList.Group>
+          </ActionList>
+        )}
       </ActionMenu.Overlay>
     </ActionMenu>
   );
