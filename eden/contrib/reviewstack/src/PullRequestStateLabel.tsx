@@ -12,16 +12,20 @@ import {StateLabel} from '@primer/react';
 
 export default function PullRequestStateLabel({
   isDraft = false,
+  reReviewRequested = false,
   reviewDecision,
   state,
   variant = 'normal',
 }: {
   isDraft?: boolean;
+  reReviewRequested?: boolean;
   reviewDecision: PullRequestReviewDecision | null;
   state: PullRequestState;
   variant?: 'small' | 'normal';
 }) {
-  const {status, label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft);
+  const {status, label, color} = pullRequestStatusAndLabel(state, reviewDecision, isDraft, {
+    reReviewRequested,
+  });
   return (
     <StateLabel status={status} variant={variant} sx={{backgroundColor: color}}>
       {label}

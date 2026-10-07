@@ -22,6 +22,33 @@ describe('pullRequestStatusAndLabel', () => {
     });
   });
 
+  it('shows a teal re-requested state once changes-requested reviewers were asked again', () => {
+    expect(
+      pullRequestStatusAndLabel(
+        PullRequestState.Open,
+        PullRequestReviewDecision.ChangesRequested,
+        false,
+        {reReviewRequested: true},
+      ),
+    ).toEqual({status: 'pullOpened', label: 'Review Re-requested', color: '#0f766e'});
+  });
+
+  it('ignores the re-requested flag unless changes were requested', () => {
+    expect(
+      pullRequestStatusAndLabel(PullRequestState.Open, PullRequestReviewDecision.Approved, false, {
+        reReviewRequested: true,
+      }),
+    ).toEqual({status: 'pullOpened', label: 'Approved', color: 'success.fg'});
+    expect(
+      pullRequestStatusAndLabel(
+        PullRequestState.Open,
+        PullRequestReviewDecision.ChangesRequested,
+        true,
+        {reReviewRequested: true},
+      ),
+    ).toEqual({status: 'pullOpened', label: 'Draft Review', color: 'fg.muted'});
+  });
+
   it('shows draft state before the review decision', () => {
     expect(
       pullRequestStatusAndLabel(PullRequestState.Open, PullRequestReviewDecision.Approved, true),

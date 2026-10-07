@@ -36,6 +36,13 @@ type ReviewRequest =
   | null
   | undefined;
 
+export type ReviewReRequestState = {
+  /** Reviewers who requested changes and have not been asked to review again. */
+  toReRequest: Array<UserFragment>;
+  /** Reviewers who requested changes and now have a pending review request. */
+  awaitingReReview: Array<UserFragment>;
+};
+
 function isUser(author: ReviewAuthor | null | undefined): author is UserFragment {
   return (
     author?.__typename === 'User' &&
@@ -46,18 +53,21 @@ function isUser(author: ReviewAuthor | null | undefined): author is UserFragment
 }
 
 /**
- * Reviewers whose latest review requested changes and who are not already
- * awaiting a new review. GitHub drops a reviewer from `reviewRequests` once
- * they submit a review, so after the author addresses the feedback these are
- * the reviewers a "Re-request review" action should ask again.
+ * Splits the reviewers whose latest review requested changes by whether a new
+ * review has already been requested from them.
  *
- * Approvals are left alone so they keep counting, and reviewers who are
- * already requested are skipped because GitHub would not notify them again.
+ * Once a review is re-requested, GitHub drops the reviewer from
+ * `latestReviews` and lists them in `reviewRequests` again, but keeps their
+ * "changes requested" verdict in `latestOpinionatedReviews` and in the pull
+ * request's reviewDecision until they review again. Reading both review lists
+ * finds everyone who requested changes before and after a re-request.
+ * Approvals are left alone so they keep counting.
  */
-export default function reviewersToReRequest(
+export default function reviewReRequestState(
+  latestOpinionatedReviews: ReadonlyArray<LatestReview>,
   latestReviews: ReadonlyArray<LatestReview>,
   reviewRequests: ReadonlyArray<ReviewRequest>,
-): Array<UserFragment> {
+): ReviewReRequestState {
   const requestedIDs = new Set<string>();
   for (const request of reviewRequests) {
     const reviewer = request?.requestedReviewer;
@@ -66,27 +76,34 @@ export default function reviewersToReRequest(
     }
   }
 
-  const reviewers: Array<UserFragment> = [];
+  const toReRequest: Array<UserFragment> = [];
+  const awaitingReReview: Array<UserFragment> = [];
   const seenIDs = new Set<string>();
-  for (const review of latestReviews) {
+  for (const review of [...latestOpinionatedReviews, ...latestReviews]) {
     const author = review?.author;
     if (
       review?.state !== ReviewState.ChangesRequested ||
       !isUser(author) ||
-      requestedIDs.has(author.id) ||
       seenIDs.has(author.id)
     ) {
       continue;
     }
     seenIDs.add(author.id);
-    reviewers.push({
+    const user: UserFragment = {
       __typename: 'User',
       id: author.id,
       login: author.login,
       avatarUrl: author.avatarUrl,
-    });
+    };
+    if (requestedIDs.has(author.id)) {
+      awaitingReReview.push(user);
+    } else {
+      toReRequest.push(user);
+    }
   }
 
-  reviewers.sort((a, b) => a.login.localeCompare(b.login));
-  return reviewers;
+  const byLogin = (a: UserFragment, b: UserFragment) => a.login.localeCompare(b.login);
+  toReRequest.sort(byLogin);
+  awaitingReReview.sort(byLogin);
+  return {toReRequest, awaitingReReview};
 }
