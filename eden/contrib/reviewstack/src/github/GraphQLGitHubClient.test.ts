@@ -325,6 +325,31 @@ describe('GraphQLGitHubClient pull request state mutations', () => {
     fetchMock.mockRestore();
   });
 
+  test('closes and reopens a pull request', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({data: {}}),
+    } as Response);
+    const client = new GraphQLGitHubClient('github.com', 'owner', 'repo', 'token');
+
+    await client.closePullRequest({pullRequestId: 'pull-request-id'});
+    await client.reopenPullRequest({pullRequestId: 'pull-request-id'});
+
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(requests).toEqual([
+      expect.objectContaining({
+        query: expect.stringContaining('mutation ClosePullRequestMutation'),
+        variables: {input: {pullRequestId: 'pull-request-id'}},
+      }),
+      expect.objectContaining({
+        query: expect.stringContaining('mutation ReopenPullRequestMutation'),
+        variables: {input: {pullRequestId: 'pull-request-id'}},
+      }),
+    ]);
+
+    fetchMock.mockRestore();
+  });
+
   test('converts a pull request between draft and ready states', async () => {
     const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,

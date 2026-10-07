@@ -30,6 +30,9 @@ import type {
   AddReactionMutationVariables,
   CommitQueryData,
   CommitQueryVariables,
+  ClosePullRequestInput,
+  ClosePullRequestMutationData,
+  ClosePullRequestMutationVariables,
   ConvertPullRequestToDraftInput,
   ConvertPullRequestToDraftMutationData,
   ConvertPullRequestToDraftMutationVariables,
@@ -62,6 +65,9 @@ import type {
   RepoLabelsQueryVariables,
   RepoMentionableUsersQueryData,
   RepoMentionableUsersQueryVariables,
+  ReopenPullRequestInput,
+  ReopenPullRequestMutationData,
+  ReopenPullRequestMutationVariables,
   RequestReviewsInput,
   RequestReviewsMutationData,
   RequestReviewsMutationVariables,
@@ -101,6 +107,7 @@ import {
   AddPullRequestReviewCommentMutation,
   AddPullRequestReviewThreadMutation,
   AddReactionMutation,
+  ClosePullRequestMutation,
   CommitQuery,
   ConvertPullRequestToDraftMutation,
   DeleteIssueCommentMutation,
@@ -114,6 +121,7 @@ import {
   RepoAssignableUsersQuery,
   RepoLabelsQuery,
   RepoMentionableUsersQuery,
+  ReopenPullRequestMutation,
   RequestReviewsMutation,
   ResolveReviewThreadMutation,
   StackPullRequestQuery,
@@ -535,6 +543,20 @@ export default class GraphQLGitHubClient implements GitHubClient {
 
   getFreshStackPullRequests(prs: number[]): Promise<StackPullRequestFragment[]> {
     return this.getStackPullRequests(prs);
+  }
+
+  closePullRequest(input: ClosePullRequestInput): Promise<ClosePullRequestMutationData> {
+    return this.query<ClosePullRequestMutationData, ClosePullRequestMutationVariables>(
+      ClosePullRequestMutation,
+      {input},
+    );
+  }
+
+  reopenPullRequest(input: ReopenPullRequestInput): Promise<ReopenPullRequestMutationData> {
+    return this.query<ReopenPullRequestMutationData, ReopenPullRequestMutationVariables>(
+      ReopenPullRequestMutation,
+      {input},
+    );
   }
 
   convertPullRequestToDraft(

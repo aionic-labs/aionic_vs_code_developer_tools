@@ -64,6 +64,7 @@ export default function PullRequestHeader({height}: Props): React.ReactElement |
           id={id}
           awaitingReReview={awaitingReReview}
           isDraft={isDraft}
+          number={number}
           reRequestReviewers={toReRequest}
           reviewDecision={effectiveReviewDecision}
           state={state}
