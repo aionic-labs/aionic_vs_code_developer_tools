@@ -12,6 +12,7 @@ import PullRequestVersions from './PullRequestVersions';
 import TrustedRenderedMarkdown from './TrustedRenderedMarkdown';
 import effectivePullRequestReviewDecision from './effectivePullRequestReviewDecision';
 import {gitHubPullRequestAtom} from './jotai';
+import reviewersToReRequest from './reviewersToReRequest';
 import {Box, Link, Text} from '@primer/react';
 import {useAtomValue} from 'jotai';
 import {Suspense} from 'react';
@@ -31,6 +32,10 @@ export default function PullRequestHeader({height}: Props): React.ReactElement |
   const effectiveReviewDecision = effectivePullRequestReviewDecision(
     reviewDecision,
     pullRequest.latestReviews?.nodes ?? [],
+  );
+  const reRequestReviewers = reviewersToReRequest(
+    pullRequest.latestReviews?.nodes ?? [],
+    pullRequest.reviewRequests?.nodes ?? [],
   );
 
   return (
@@ -55,6 +60,7 @@ export default function PullRequestHeader({height}: Props): React.ReactElement |
         <PullRequestDraftStateMenu
           id={id}
           isDraft={isDraft}
+          reRequestReviewers={reRequestReviewers}
           reviewDecision={effectiveReviewDecision}
           state={state}
           viewerCanUpdate={viewerCanUpdate}

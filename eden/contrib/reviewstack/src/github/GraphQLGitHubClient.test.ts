@@ -28,9 +28,7 @@ describe('recursive Git tree prefetch', () => {
       {
         id: 'src-tree',
         oid: 'src-tree',
-        entries: [
-          {mode: 0o100644, name: 'a.ts', oid: 'a', path: 'src/a.ts', type: 'blob'},
-        ],
+        entries: [{mode: 0o100644, name: 'a.ts', oid: 'a', path: 'src/a.ts', type: 'blob'}],
       },
     ]);
   });
@@ -303,6 +301,30 @@ describe('GraphQLGitHubClient pull request mutations', () => {
 });
 
 describe('GraphQLGitHubClient pull request state mutations', () => {
+  test('re-requests reviews without replacing pending requests', async () => {
+    const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({data: {}}),
+    } as Response);
+    const client = new GraphQLGitHubClient('github.com', 'owner', 'repo', 'token');
+
+    await client.requestReviews({
+      pullRequestId: 'pull-request-id',
+      userIds: ['user-1'],
+      union: true,
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(String(init?.body))).toEqual(
+      expect.objectContaining({
+        query: expect.stringContaining('mutation RequestReviewsMutation'),
+        variables: {input: {pullRequestId: 'pull-request-id', userIds: ['user-1'], union: true}},
+      }),
+    );
+
+    fetchMock.mockRestore();
+  });
+
   test('converts a pull request between draft and ready states', async () => {
     const fetchMock = jest.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
