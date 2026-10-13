@@ -13,7 +13,13 @@
   margin-left: 10px;
 }
 
+/*
+ * The drawer content must shrink to leave room for the label and the drag
+ * handle. Without min-width: 0 the timeline's intrinsic width pushes the right
+ * drawer's label and handle outside the drawer, where they are clipped.
+ */
 .reviewstack .drawer-left > div:nth-child(3),
 .reviewstack .drawer-right > div:nth-child(3) {
-  width: 100%;
+  flex: 1 1 0;
+  min-width: 0;
 }
