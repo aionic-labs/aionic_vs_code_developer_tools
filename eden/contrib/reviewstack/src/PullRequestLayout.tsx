@@ -71,7 +71,7 @@ export default function PullRequestLayout({
           errorBoundary={ErrorBoundary}
           leftLabel={<Text className="drawer-label-text">Files</Text>}
           left={<FilesDrawer />}
-          rightLabel={<Text className="drawer-label-text">...</Text>}
+          rightLabel={<Text className="drawer-label-text">Comments</Text>}
           right={<TimelineDrawer />}>
           <Box display="flex" flexDirection="row">
             <Box
