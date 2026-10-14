@@ -73,10 +73,15 @@ export default function DefaultLoginDialog({
   }, [restoreOAuth]);
 
   function startOAuth() {
+    // Disable the button before leaving so a second click cannot start a
+    // parallel authorization while the browser is navigating.
+    setCheckingOAuth(true);
     const returnURL = new URL(window.location.href);
     returnURL.searchParams.set(GITHUB_RETURN_PARAMETER, '1');
     const returnTo = `${returnURL.pathname}${returnURL.search}${returnURL.hash}`;
-    window.location.assign(`${GITHUB_START_ENDPOINT}?rd=${encodeURIComponent(returnTo)}`);
+    window.requestAnimationFrame(() => {
+      window.location.assign(`${GITHUB_START_ENDPOINT}?rd=${encodeURIComponent(returnTo)}`);
+    });
   }
 
   function submit(event: FormEvent) {
