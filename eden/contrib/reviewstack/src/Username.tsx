@@ -41,8 +41,13 @@ export default function Username(): React.ReactElement | null {
 
   const setToken = useSetAtom(gitHubTokenPersistenceAtom);
   const onLogout = useCallback(() => {
-    setToken(null);
-    customLogout?.();
+    // Leave the page only after the local data is cleared so the token and
+    // cached GitHub data do not survive the navigation to the proxy sign-out.
+    const cleared = setToken(null);
+    const leave = customLogout;
+    if (leave != null) {
+      cleared.then(leave, leave);
+    }
   }, [setToken]);
 
   // Show UI when we have a token (regardless of loading state)
