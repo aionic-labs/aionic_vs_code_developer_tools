@@ -6,12 +6,16 @@
 name: Release - Aionic Sapling
 on:
   workflow_dispatch: null
-  push:
-    tags:
-      - aionic-v*
   pull_request:
     paths:
       - .github/workflows/aionic-release.yml
+  # TEMPORARY for testing: each push to this branch builds and publishes a
+  # prerelease. Remove before merging.
+  push:
+    tags:
+      - aionic-v*
+    branches:
+      - ci/aionic-release
 
 permissions:
   contents: read
@@ -83,8 +87,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          prerelease=()
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             tag=$GITHUB_REF_NAME
+          elif [[ "$GITHUB_REF_NAME" == ci/aionic-release ]]; then
+            # TEMPORARY for testing. Remove with the push trigger above.
+            tag="aionic-test-$(ci/tag-name.sh)"
+            prerelease=(--prerelease)
           else
             tag="aionic-v$(ci/tag-name.sh)"
           fi
@@ -105,5 +114,5 @@ jobs:
 
           \`brew pin\` keeps \`brew upgrade\` from replacing this build with the upstream one.
           NOTES
-          gh release create "$tag" --target "$GITHUB_SHA" --title "Aionic Sapling $tag" \
-            --notes-file notes.md "$bottle" "$vsix"
+          gh release create "$tag" "${prerelease[@]}" --target "$GITHUB_SHA" \
+            --title "Aionic Sapling $tag" --notes-file notes.md "$bottle" "$vsix"
