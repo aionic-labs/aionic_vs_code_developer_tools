@@ -100,19 +100,14 @@ jobs:
           bottle=$(ls sapling-*.arm64_sequoia.bottle.tar.gz)
           vsix=$(ls aionic-sapling-*.vsix)
           cat > notes.md <<NOTES
-          Install on a Mac with Apple silicon. The CLI replaces the Homebrew \`sapling\`, and
-          the extension replaces the Meta Sapling extension.
+          Install or update on a Mac with Apple silicon. The CLI replaces the Homebrew
+          \`sapling\`, and the extension replaces the Meta Sapling extension.
 
           \`\`\`bash
-          gh release download $tag -R $GITHUB_REPOSITORY -p '*.bottle.tar.gz' -p '*.vsix'
-          brew uninstall --ignore-dependencies sapling
-          HOMEBREW_DEVELOPER=1 brew install ./$bottle
-          brew pin sapling
-          code --uninstall-extension meta.sapling-scm
-          code --install-extension ./$vsix
+          curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash -s -- --tag '$tag'
           \`\`\`
 
-          \`brew pin\` keeps \`brew upgrade\` from replacing this build with the upstream one.
+          The script pins \`sapling\` in Homebrew, so \`brew upgrade\` keeps this build.
           NOTES
           gh release create "$tag" "${prerelease[@]}" --target "$GITHUB_SHA" \
             --title "Aionic Sapling $tag" --notes-file notes.md "$bottle" "$vsix"
