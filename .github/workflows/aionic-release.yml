@@ -1,0 +1,104 @@
+# Builds the Aionic Sapling CLI for macOS arm64 and the Aionic Sapling VS Code
+# extension, and publishes both as a GitHub release. A pull request that changes
+# this file only builds them.
+#
+# Release: push a tag aionic-v<anything>, or use "Run workflow" on main.
+name: Release - Aionic Sapling
+on:
+  workflow_dispatch: null
+  pull_request:
+    paths:
+      - .github/workflows/aionic-release.yml
+  push:
+    tags:
+      - aionic-v*
+
+permissions:
+  contents: read
+
+jobs:
+  vscode-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Install dependencies
+        working-directory: ./addons
+        run: yarn install --frozen-lockfile
+      - name: Package the extension
+        working-directory: ./addons/vscode
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          npx --yes @vscode/vsce@3 package --no-dependencies --out "../../aionic-sapling-$version.vsix"
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: vscode-extension
+          path: aionic-sapling-*.vsix
+
+  cli-macos-arm64:
+    # Upstream uses macos-15-xlarge. The standard runner is slower but free.
+    runs-on: macos-15
+    timeout-minutes: 300
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: set-env SAPLING_VERSION
+        run: echo "SAPLING_VERSION=$(ci/tag-name.sh)" >> "$GITHUB_ENV"
+      - name: Tap homebrew-core
+        run: brew tap homebrew/core
+      # The formula builds from a tarball of this checkout, not from upstream.
+      - name: Prepare build environment
+        run: |
+          eden/scm/packaging/mac/prepare_formula.py \
+            -t aarch64-apple-darwin \
+            -r "$SAPLING_VERSION" \
+            -o "$(brew --repository)/Library/Taps/homebrew/homebrew-core/Formula/s/sapling.rb"
+      - name: Install and build Sapling bottle
+        run: HOMEBREW_NO_INSTALL_FROM_API=1 HOMEBREW_FAIL_LOG_LINES=100 brew install --build-bottle sapling
+      - name: Create Sapling bottle
+        run: HOMEBREW_NO_INSTALL_FROM_API=1 brew bottle sapling
+      - name: Rename bottle to a platform specific name
+        run: mv sapling*sequoia.bottle*.tar.gz "sapling-$SAPLING_VERSION.arm64_sequoia.bottle.tar.gz"
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: cli-macos-arm64
+          path: sapling-*.arm64_sequoia.bottle.tar.gz
+
+  release:
+    if: github.event_name != 'pull_request'
+    needs: [vscode-extension, cli-macos-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+      - name: Download Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            tag=$GITHUB_REF_NAME
+          else
+            tag="aionic-v$(ci/tag-name.sh)"
+          fi
+          bottle=$(ls sapling-*.arm64_sequoia.bottle.tar.gz)
+          vsix=$(ls aionic-sapling-*.vsix)
+          cat > notes.md <<NOTES
+          Install or update on a Mac with Apple silicon. The CLI replaces the Homebrew
+          \`sapling\`, and the extension replaces the Meta Sapling extension.
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash -s -- --tag '$tag'
+          \`\`\`
+
+          The script pins \`sapling\` in Homebrew, so \`brew upgrade\` keeps this build.
+          NOTES
+          gh release create "$tag" --target "$GITHUB_SHA" --title "Aionic Sapling $tag" \
+            --notes-file notes.md "$bottle" "$vsix"
