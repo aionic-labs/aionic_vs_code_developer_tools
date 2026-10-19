@@ -1,0 +1,25 @@
+query PullRequestLandingStateQuery($owner: String!, $name: String!, $pr: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      id
+      number
+      state
+      merged
+      mergeable
+      baseRefName
+      headRefName
+      headRefOid
+      isCrossRepository
+      commits(last: 1) {
+        nodes {
+          commit {
+            oid
+            statusCheckRollup {
+              state
+            }
+          }
+        }
+      }
+    }
+  }
+}
