@@ -23,6 +23,7 @@ import type {
   UsernameQueryVariables,
 } from '../generated/graphql';
 import type GitHubClient from '../github/GitHubClient';
+import type StackLandingClient from '../github/StackLandingClient';
 import type {DiffCommitIDs, DiffWithCommitIDs, CommitChange} from '../github/diffTypes';
 import type {
   GitHubPullRequestReviewThread,
@@ -55,6 +56,7 @@ import {
 import {pullRequestNumbersFromBody} from '../ghstackUtils';
 import CachingGitHubClient, {openDatabase} from '../github/CachingGitHubClient';
 import GraphQLGitHubClient from '../github/GraphQLGitHubClient';
+import {GitHubStackLandingClient} from '../github/StackLandingClient';
 import {ALL_DB_NAMES_EVER} from '../github/databaseInfo';
 import {diffCommitWithParent, diffCommits} from '../github/diff';
 import {diffVersions} from '../github/diffVersions';
@@ -367,6 +369,17 @@ export const gitHubClientAtom = atom<Promise<GitHubClient | null>>(async get => 
   } else {
     return null;
   }
+});
+
+/** Uncached client for the branch updates that landing a Sapling stack needs. */
+export const stackLandingClientAtom = atom<StackLandingClient | null>(get => {
+  const token = localStorage.getItem('github.token');
+  const orgAndRepo = get(gitHubOrgAndRepoAtom);
+  if (token == null || orgAndRepo == null) {
+    return null;
+  }
+  const hostname = localStorage.getItem('github.hostname') ?? 'github.com';
+  return new GitHubStackLandingClient(hostname, orgAndRepo.org, orgAndRepo.repo, token);
 });
 
 // =============================================================================
