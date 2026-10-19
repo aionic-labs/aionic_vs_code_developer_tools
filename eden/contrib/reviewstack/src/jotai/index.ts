@@ -23,6 +23,7 @@ export {
   gitHubUsernameAtom,
   gitHubOrgAndRepoAtom,
   gitHubClientAtom,
+  stackLandingClientAtom,
   gitHubPullRequestRefreshTriggerAtom,
   gitHubPullRequestForParamsAtom,
   gitHubRepoLabelsQuery,
