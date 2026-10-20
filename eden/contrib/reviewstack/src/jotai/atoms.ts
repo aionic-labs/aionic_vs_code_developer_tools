@@ -62,7 +62,7 @@ import {diffCommitWithParent, diffCommits} from '../github/diff';
 import {diffVersions} from '../github/diffVersions';
 import {createGraphQLEndpointForHostname} from '../github/gitHubCredentials';
 import {broadcastLogoutMessage, subscribeToLogout} from '../github/logoutBroadcastChannel';
-import queryGraphQL from '../github/queryGraphQL';
+import queryGraphQL, {GitHubGraphQLError} from '../github/queryGraphQL';
 import {recoverReviewRequestsData, recoverUserHomePageData} from '../github/recoverHomePageData';
 import reviewThreadsForVersion from '../reviewThreadsForVersion';
 import {parseSaplingStackBody} from '../saplingStack';
@@ -1682,6 +1682,9 @@ export type GitHubUserHomePageData = {
   reviewRequests: NonNullable<UserReviewRequestsQueryData['search']['nodes']>;
 };
 
+/** Authored pull requests are loaded newest first, 100 per page, up to this many pages. */
+const MAX_AUTHORED_PAGES = 3;
+
 export const gitHubUserHomePageRefreshTriggerAtom = atom(0);
 
 export const gitHubUserHomePageDataAtom = atom<Promise<GitHubUserHomePageData | null>>(
@@ -1701,10 +1704,11 @@ export const gitHubUserHomePageDataAtom = atom<Promise<GitHubUserHomePageData | 
     const fetchAuthored = async () => {
       const pullRequests: GitHubUserHomePageData['pullRequests'] = [];
       let after: string | null = null;
+      let pageCount = 0;
       do {
         // Each page depends on the cursor returned by the previous page.
         // eslint-disable-next-line no-await-in-loop
-        const data: UserHomePageQueryData = await queryGraphQL<
+        const data: UserHomePageQueryData | null = await queryGraphQL<
           UserHomePageQueryData,
           UserHomePageQueryVariables
         >(UserHomePageQuery, {after}, requestHeaders, graphQLEndpoint).catch(error => {
@@ -1712,11 +1716,22 @@ export const gitHubUserHomePageDataAtom = atom<Promise<GitHubUserHomePageData | 
           if (partialData != null) {
             return partialData;
           }
+          // GitHub often times out on deep pages of a long history. Keep the
+          // recent pull requests already loaded instead of failing the page.
+          if (pageCount > 0 && !(error instanceof GitHubGraphQLError && error.isRateLimitError)) {
+            return null;
+          }
           throw error;
         });
-        const connection = data.viewer.pullRequests;
+        if (data == null) {
+          return pullRequests;
+        }
+        pageCount++;
+        const connection: UserHomePageQueryData['viewer']['pullRequests'] =
+          data.viewer.pullRequests;
         pullRequests.push(...(connection.nodes ?? []));
-        if (!connection.pageInfo.hasNextPage) {
+        // Results are newest first, so older pages only hold long-finished work.
+        if (!connection.pageInfo.hasNextPage || pageCount >= MAX_AUTHORED_PAGES) {
           return pullRequests;
         }
         after = connection.pageInfo.endCursor ?? null;
