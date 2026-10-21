@@ -23,3 +23,30 @@
   flex: 1 1 0;
   min-width: 0;
 }
+
+/* Drag handle between the timeline and the PR-wide comment box. */
+.reviewstack .timeline-input-resize-handle {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 12px;
+  color: var(--fgColor-muted, var(--color-fg-muted));
+  font-size: 11px;
+  line-height: 1;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+  background: var(--bgColor-muted, var(--color-canvas-subtle));
+  border-top: 1px solid var(--borderColor-default, var(--color-border-default));
+}
+
+.reviewstack .timeline-input-resize-handle:hover {
+  color: var(--fgColor-default, var(--color-fg-default));
+  background: var(--bgColor-neutral-muted, var(--color-neutral-muted));
+}
+
+/* The textarea fills the box; 45px covers its padding and the button row. */
+.reviewstack .timeline-comment-input textarea {
+  height: calc(var(--timeline-input-height) - 45px) !important;
+}
