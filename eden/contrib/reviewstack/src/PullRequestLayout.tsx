@@ -18,7 +18,7 @@ import {APP_HEADER_HEIGHT} from './constants';
 import {gitHubOrgAndRepoAtom, gitHubPullRequestIDAtom} from './jotai';
 import {Box, Text} from '@primer/react';
 import {atom, useSetAtom} from 'jotai';
-import React, {Component, Suspense, useEffect} from 'react';
+import React, {Component, Suspense, useCallback, useEffect, useRef, useState} from 'react';
 import {Drawers} from 'shared/Drawers';
 
 import './PullRequestLayout.css';
@@ -96,19 +96,75 @@ function FilesDrawer() {
 }
 
 function TimelineDrawer() {
+  const [inputHeight, setInputHeight] = useState(loadCommentInputHeight);
+  const inputHeightRef = useRef(inputHeight);
+  inputHeightRef.current = inputHeight;
+
+  const onResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = inputHeightRef.current;
+    const move = (e: PointerEvent) => {
+      const maxHeight = Math.round(window.innerHeight * MAX_COMMENT_INPUT_FRACTION);
+      const height = Math.min(
+        maxHeight,
+        Math.max(MIN_COMMENT_INPUT_HEIGHT, startHeight + startY - e.clientY),
+      );
+      inputHeightRef.current = height;
+      setInputHeight(height);
+    };
+    const end = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      try {
+        localStorage.setItem(COMMENT_INPUT_HEIGHT_KEY, String(inputHeightRef.current));
+      } catch {
+        // Not persisting the height is fine.
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+  }, []);
   return (
     <Box display="flex" flexDirection="column" height={`calc(100vh - ${TOTAL_HEADER_HEIGHT}px)`}>
-      <Box
-        data-reviewstack-timeline-scroll="true"
-        height={`calc(100% - ${COMMENT_INPUT_HEIGHT}px)`}
-        overflow="auto">
+      <Box data-reviewstack-timeline-scroll="true" flexGrow={1} minHeight={0} overflow="auto">
         <PullRequestTimeline />
       </Box>
-      <Box display="flex" height={COMMENT_INPUT_HEIGHT}>
+      <div
+        className="timeline-input-resize-handle"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize comment box"
+        title="Drag to resize the comment box"
+        onPointerDown={onResizeStart}>
+        <span aria-hidden="true">⇕</span>
+      </div>
+      <Box
+        className="timeline-comment-input"
+        display="flex"
+        flexShrink={0}
+        height={inputHeight}
+        style={{'--timeline-input-height': `${inputHeight}px`} as React.CSSProperties}>
         <PullRequestTimelineCommentInput />
       </Box>
     </Box>
   );
+}
+
+const COMMENT_INPUT_HEIGHT_KEY = 'reviewstack.commentInputHeight';
+const MIN_COMMENT_INPUT_HEIGHT = 100;
+const MAX_COMMENT_INPUT_FRACTION = 0.7;
+
+function loadCommentInputHeight(): number {
+  try {
+    const stored = Number(localStorage.getItem(COMMENT_INPUT_HEIGHT_KEY));
+    if (Number.isFinite(stored) && stored >= MIN_COMMENT_INPUT_HEIGHT) {
+      return stored;
+    }
+  } catch {
+    // Fall back to the default when storage is unavailable.
+  }
+  return COMMENT_INPUT_HEIGHT;
 }
 
 type Props = {
