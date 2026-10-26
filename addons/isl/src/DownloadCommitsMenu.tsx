@@ -29,12 +29,13 @@ import {t, T} from './i18n';
 import {configBackedAtom, readAtom} from './jotaiUtils';
 import {GotoOperation} from './operations/GotoOperation';
 import {GraftOperation} from './operations/GraftOperation';
+import {PrPullOperation} from './operations/PrPullOperation';
 import {PullRevOperation} from './operations/PullRevOperation';
 import {RebaseKeepOperation} from './operations/RebaseKeepOperation';
 import {RebaseOperation} from './operations/RebaseOperation';
 import {useRunOperation} from './operationsState';
 import {dagWithPreviews} from './previews';
-import {forceFetchCommit} from './serverAPIState';
+import {forceFetchCommit, repositoryInfo} from './serverAPIState';
 import {exactRevset, succeedableRevset} from './types';
 
 import './DownloadCommitsMenu.css';
@@ -79,6 +80,12 @@ function maybeSupportedByPull(name: string): boolean {
   );
 }
 
+/** Returns the number of a `pr123` name, which Sapling resolves to a GitHub pull request. */
+function pullRequestNumber(name: string): number | null {
+  const match = /^pr(\d+)$/i.exec(name.trim());
+  return match == null ? null : parseInt(match[1], 10);
+}
+
 function DownloadCommitsTooltip({dismiss}: {dismiss: () => unknown}) {
   const [enteredRevset, setEnteredRevset] = useState('');
   const runOperation = useRunOperation();
@@ -110,7 +117,20 @@ function DownloadCommitsTooltip({dismiss}: {dismiss: () => unknown}) {
     // This is not a correctness issue because we show no optimistically downloaded result to act on.
     // Worst case, the rebase/goto will be queued after some other unrelated actions which should be fine.
 
-    if (maybeSupportedByPull(enteredRevset)) {
+    const prNumber = pullRequestNumber(enteredRevset);
+    if (prNumber != null && readAtom(repositoryInfo)?.codeReviewSystem.type === 'github') {
+      // `pr pull` also links the pull requests below this one in its stack to
+      // their commits, which a plain `pull --rev` leaves unlinked.
+      try {
+        await runOperation(new PrPullOperation(prNumber), /* throwOnError */ true);
+      } catch {
+        // `pr pull` refuses ghstack pull requests, for example.
+        await runOperation(
+          new PullRevOperation(exactRevset(enteredRevset)),
+          /* throwOnError */ true,
+        );
+      }
+    } else if (maybeSupportedByPull(enteredRevset)) {
       try {
         await runOperation(
           new PullRevOperation(exactRevset(enteredRevset)),

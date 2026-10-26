@@ -17,6 +17,7 @@ import {
   resetTestMessages,
   simulateCommits,
   simulateMessageFromServer,
+  simulateRepoConnected,
   TEST_COMMIT_HISTORY,
 } from '../testUtils';
 import {CommandRunner} from '../types';
@@ -126,6 +127,77 @@ describe('Download Commits', () => {
         id: expect.anything(),
       },
     });
+  });
+
+  it('uses pr pull for GitHub pull requests so their stack is linked', async () => {
+    act(() => simulateRepoConnected());
+    fireEvent.click(screen.getByTestId('download-commits-tooltip-button'));
+
+    act(() => {
+      userEvent.type(screen.getByTestId('download-commits-input'), 'pr424');
+    });
+
+    fireEvent.click(screen.getByTestId('download-commit-button'));
+
+    const pullMessage = await waitFor(() =>
+      utils.nullthrows(getLastMessageOfTypeSentToServer('runOperation')),
+    );
+    expect(pullMessage.operation).toEqual({
+      args: ['pr', 'pull', '424'],
+      runner: CommandRunner.Sapling,
+      trackEventName: 'PrPullOperation',
+      id: expect.anything(),
+    });
+    act(() =>
+      simulateMessageFromServer({
+        type: 'operationProgress',
+        id: pullMessage.operation.id,
+        kind: 'exit',
+        exitCode: 0,
+        timestamp: 0,
+      }),
+    );
+    await waitFor(() => {
+      expectMessageSentToServer({
+        type: 'fetchLatestCommit',
+        revset: 'pr424',
+      });
+    });
+  });
+
+  it('falls back to pull --rev when pr pull fails', async () => {
+    act(() => simulateRepoConnected());
+    fireEvent.click(screen.getByTestId('download-commits-tooltip-button'));
+
+    act(() => {
+      userEvent.type(screen.getByTestId('download-commits-input'), 'pr424');
+    });
+
+    fireEvent.click(screen.getByTestId('download-commit-button'));
+
+    const prPullMessage = await waitFor(() =>
+      utils.nullthrows(getLastMessageOfTypeSentToServer('runOperation')),
+    );
+    act(() =>
+      simulateMessageFromServer({
+        type: 'operationProgress',
+        id: prPullMessage.operation.id,
+        kind: 'exit',
+        exitCode: 255,
+        timestamp: 0,
+      }),
+    );
+    await waitFor(() =>
+      expectMessageSentToServer({
+        type: 'runOperation',
+        operation: {
+          args: ['pull', '--rev', {type: 'exact-revset', revset: 'pr424'}],
+          runner: CommandRunner.Sapling,
+          trackEventName: 'PullRevOperation',
+          id: expect.anything(),
+        },
+      }),
+    );
   });
 
   it('keyboard shortcut support', () => {
