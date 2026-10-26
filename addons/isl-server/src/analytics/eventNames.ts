@@ -112,6 +112,7 @@ export type TrackEventName =
   | 'PhabricatorCommentsInsetShow'
   | 'PhabricatorCommentsAIResolve'
   | 'PhabricatorRollbackPlanEvent'
+  | 'PrPullOperation'
   | 'PrSubmitOperation'
   | 'PullOperation'
   | 'PullRevOperation'
