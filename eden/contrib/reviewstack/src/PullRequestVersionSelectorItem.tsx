@@ -44,6 +44,10 @@ export default React.memo(function PullRequestVersionSelectorItem({
   const setComparableVersions = useSetAtom(gitHubPullRequestComparableVersionsAtom);
   const reviewThreadsByCommit = useAtomValue(gitHubPullRequestThreadsByCommitAtom);
   const commentCount = commits.reduce((acc, commit) => {
+    // Sapling versions also list the heads of earlier versions for comparison.
+    if (commit.version != null && commit.version !== index + 1) {
+      return acc;
+    }
     const reviewThreadsForCommit = reviewThreadsByCommit.get(commit.commit);
     if (reviewThreadsForCommit == null) {
       return acc;

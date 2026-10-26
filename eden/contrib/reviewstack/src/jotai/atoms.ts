@@ -45,6 +45,7 @@ import type {
   VersionCommit,
 } from '../github/types';
 import type {SaplingPullRequestBody} from '../saplingStack';
+import type {Getter} from 'jotai';
 
 import {lineToPositionAtom} from '../diffServiceClient';
 import {
@@ -65,6 +66,7 @@ import {broadcastLogoutMessage, subscribeToLogout} from '../github/logoutBroadca
 import queryGraphQL, {GitHubGraphQLError} from '../github/queryGraphQL';
 import {recoverReviewRequestsData, recoverUserHomePageData} from '../github/recoverHomePageData';
 import reviewThreadsForVersion from '../reviewThreadsForVersion';
+import saplingPullRequestVersions from '../saplingPullRequestVersions';
 import {parseSaplingStackBody} from '../saplingStack';
 import saplingVersionDiffPairs from '../saplingVersionDiff';
 import {getPathForChange, getTreeEntriesForChange} from '../utils';
@@ -1093,6 +1095,30 @@ const gitHubPullRequestVersionBaseAndCommitsAtom = atomFamily(
 );
 
 /**
+ * Returns up to `numCommits` commits ending at `head`, oldest first, following
+ * first parents.
+ */
+async function commitAndFirstParents(
+  get: Getter,
+  head: GitObjectID,
+  numCommits: number,
+): Promise<Commit[]> {
+  const commits: Commit[] = [];
+  let oid: GitObjectID | undefined = head;
+  while (oid != null && commits.length < numCommits) {
+    // A commit's parent is only known once the commit itself has been fetched.
+    // eslint-disable-next-line no-await-in-loop
+    const commit: Commit | null = await get(gitHubCommitAtom(oid));
+    if (commit == null) {
+      break;
+    }
+    commits.unshift(commit);
+    oid = commit.parents[0];
+  }
+  return commits;
+}
+
+/**
  *
  * The list of PR versions (each force push creates a new version).
  * Now fully computed in Jotai.
@@ -1120,7 +1146,6 @@ export const gitHubPullRequestVersionsAtom = atom<Promise<Version[]>>(async get 
   const stackedPR = get(stackedPullRequestAtom);
   if (stackedPR.type === 'sapling') {
     const fragments = await get(stackedPullRequestFragmentsAtom);
-    versions.reverse();
 
     const index = stackedPR.body.currentStackEntry;
     const parentPullRequest = stackedPR.body.stack[index + 1];
@@ -1130,96 +1155,21 @@ export const gitHubPullRequestVersionsAtom = atom<Promise<Version[]>>(async get 
         : fragments.find(fragment => fragment.number === parentPullRequest.number);
 
     const saplingStack = stackedPR.body;
+    const {numCommits} = saplingStack.stack[saplingStack.currentStackEntry];
 
-    // Prefetch all commits upfront to avoid await in loop
-    const allFetchedCommits = await Promise.all(commits.map(c => get(gitHubCommitAtom(c.oid))));
-    const commitsByOid = new Map<GitObjectID, Commit>();
-    allFetchedCommits.forEach((commit, idx) => {
-      if (commit != null) {
-        commitsByOid.set(commits[idx].oid, commit);
-      }
-    });
+    // The PR's commit list only covers the latest version, and it also
+    // contains the commits of the PRs below this one in the stack, so walk
+    // back from each version's head to find the commits it was made of.
+    const commitsForVersions = await Promise.all(
+      versions.map(version => commitAndFirstParents(get, version.oid, numCommits)),
+    );
 
-    let cumulativeCommits = 0;
-    let previous = commits.length;
-
-    const pr_versions: Version[] = [];
-    for (const version of versions) {
-      const {numCommits} = saplingStack.stack[saplingStack.currentStackEntry];
-      cumulativeCommits += numCommits;
-
-      // We need to separate the commits that were designed to be part of this
-      // PR from the ones below in the stack.
-      const start = commits.length - cumulativeCommits;
-      const commitFragmentsForPRVersion = commits.slice(start, previous);
-      previous = start;
-
-      // Get prefetched commits
-      const validCommits = commitFragmentsForPRVersion
-        .map(c => commitsByOid.get(c.oid))
-        .filter(notEmpty);
-
-      const versionCommits: VersionCommit[] = [];
-      for (let i = 0; i < forcePushes.length; i++) {
-        const f = forcePushes[i];
-        if (f.beforeCommit === version.oid) {
-          break;
-        }
-        versionCommits.push({
-          author: null,
-          commit: f.beforeCommit,
-          committedDate: f.beforeCommittedDate,
-          title: 'Version ' + (i + 1),
-          parents: f.beforeParents,
-          version: i + 1,
-        });
-      }
-
-      validCommits.forEach(c =>
-        versionCommits.push({
-          author: null,
-          commit: c.oid,
-          committedDate: c.committedDate,
-          title: c.messageHeadline,
-          parents: c.parents,
-          version: versionCommits.length + 1,
-        }),
-      );
-
-      let headCommittedDate: DateTime | null = null;
-      const headCommit = validCommits[validCommits.length - 1];
-      if (headCommit == null) {
-        headCommittedDate = latestCommit?.committedDate ?? null;
-      } else {
-        headCommittedDate = headCommit.committedDate;
-      }
-
-      let baseParent: GitObjectID | null = null;
-      let baseParentCommittedDate: DateTime | null = null;
-      if (parentFragment == null) {
-        // the first PR in stack case
-        if (validCommits.length > 0) {
-          baseParent = validCommits[0].parents[0];
-        } else if (forcePushes.length > 0) {
-          baseParent = forcePushes[0].beforeParents[0];
-          baseParentCommittedDate = forcePushes[0].beforeCommittedDate;
-        }
-      } else {
-        // the not first PR in stack case
-        baseParent = parentFragment.headRefOid;
-      }
-
-      pr_versions.push({
-        headCommit: version.oid,
-        headCommittedDate,
-        baseParent,
-        baseParentCommittedDate,
-        commits: versionCommits,
-      });
-    }
-
-    pr_versions.reverse();
-    return pr_versions;
+    return saplingPullRequestVersions(
+      versions,
+      forcePushes,
+      commitsForVersions,
+      parentFragment?.headRefOid ?? null,
+    );
   }
 
   // Get the base parent and all commits for each version branch.
