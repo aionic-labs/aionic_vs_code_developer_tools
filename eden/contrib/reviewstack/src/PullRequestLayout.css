@@ -46,7 +46,15 @@
   background: var(--bgColor-neutral-muted, var(--color-neutral-muted));
 }
 
-/* The textarea fills the box; 45px covers its padding and the button row. */
-.reviewstack .timeline-comment-input textarea {
+/*
+ * The textarea fills the box; 45px covers its padding and the button row.
+ * Size Primer's wrapper around the textarea, not only the textarea, or the
+ * wrapper keeps its 80px and the textarea covers or pushes out the buttons.
+ */
+.reviewstack .timeline-comment-input .comment-input-editor > * {
   height: calc(var(--timeline-input-height) - 45px) !important;
+}
+
+.reviewstack .timeline-comment-input textarea {
+  height: 100% !important;
 }
